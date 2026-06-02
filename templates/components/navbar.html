@@ -1,0 +1,20 @@
+<!-- 导航栏组件 -->
+<nav class="navbar">
+    <div class="logo" onclick="location.href='/'">
+        <div class="logo-icon">📚</div>
+        <span>智学伴</span>
+    </div>
+    <div class="nav-items">
+        <a href="/" class="nav-item {% if request.path == '/' %}active{% endif %}">首页答疑</a>
+        <a href="/knowledge-base" class="nav-item {% if request.path == '/knowledge-base' %}active{% endif %}">知识库</a>
+        <a href="/profile" class="nav-item {% if request.path == '/profile' %}active{% endif %}">个人中心</a>
+    </div>
+    <div class="user-info" id="userInfo" style="display: none;">
+        <a href="/profile" style="display: flex; align-items: center; gap: 12px; text-decoration: none;">
+            <div class="user-avatar" id="navAvatar"></div>
+            <span id="username" style="color: black;"></span>
+        </a>
+        <a href="#" class="logout-btn" onclick="logout()">退出</a>
+    </div>
+    <!-- 登录注册按钮已移除，因为只有登录才能进入系统 -->
+</nav>

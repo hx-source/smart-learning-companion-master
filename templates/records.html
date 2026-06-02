@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学习记录 - 智学伴</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <!-- 预加载关键资源 -->
+    <link rel="preload" href="/static/js/shared.js" as="script">
+    <link rel="preload" href="/static/css/style.css" as="style">
+</head>
+<body>
+    <!-- 导航栏 -->
+    {% include 'components/navbar.html' %}
+
+    <!-- 主内容 -->
+    <div class="main-wrapper">
+        <main class="records-page">
+            <h1 class="page-title">学习记录</h1>
+            
+            <!-- 记录过滤器 -->
+            <div class="filter-section">
+                <div class="filter-options">
+                    <select id="categoryFilter">
+                        <option value="all">全部类别</option>
+                        <option value="数学">数学</option>
+                        <option value="编程">编程</option>
+                        <option value="人工智能">人工智能</option>
+                        <option value="物理">物理</option>
+                        <option value="英语">英语</option>
+                    </select>
+                    <input type="text" id="searchInput" placeholder="搜索问题..." onkeypress="handleSearchKeyPress(event)">
+                    <button class="search-btn" onclick="searchRecords()">搜索</button>
+                </div>
+            </div>
+
+            <!-- 记录列表 -->
+            <div class="records-list" id="recordsList">
+                <div class="loading">
+                    <div class="loading-dots"><span></span><span></span><span></span></div>
+                    <div>加载中...</div>
+                </div>
+            </div>
+
+            <!-- 分页 -->
+            <div class="pagination" id="pagination">
+                <!-- 动态生成 -->
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // 页面特定变量
+        let currentPage = 1;
+        let totalPages = 1;
+        
+        // 前端缓存
+        const recordsCache = {
+            records: {},
+            lastFetch: {}
+        };
+
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', function() {
+            loadRecords();
+        });
+
+        async function loadRecords() {
+            const user = getCurrentUser();
+            const userId = user ? user.id : 1;
+            const category = document.getElementById('categoryFilter').value;
+            const search = document.getElementById('searchInput').value;
+            
+            // 检查缓存是否有效（5分钟内）
+            const cacheKey = `records_${userId}_${currentPage}_${category}_${search}`;
+            const now = Date.now();
+            
+            if (recordsCache.records[cacheKey] && recordsCache.lastFetch[cacheKey] && (now - recordsCache.lastFetch[cacheKey] < 5 * 60 * 1000)) {
+                renderRecords(recordsCache.records[cacheKey]);
+                return;
+            }
+
+            const recordsList = document.getElementById('recordsList');
+            recordsList.innerHTML = `
+                <div class="loading">
+                    <div class="loading-dots"><span></span><span></span><span></span></div>
+                    <div>加载中...</div>
+                </div>
+            `;
+
+            try {
+                let url = `/api/records?user_id=${userId}&page=${currentPage}`;
+                if (category && category !== 'all') url += `&category=${encodeURIComponent(category)}`;
+                if (search) url += `&search=${encodeURIComponent(search)}`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.code === 200) {
+                    recordsCache.records[cacheKey] = data.data;
+                    recordsCache.lastFetch[cacheKey] = now;
+                    renderRecords(data.data);
+                } else {
+                    recordsList.innerHTML = '<div class="error">加载失败，请稍后重试</div>';
+                }
+            } catch (error) {
+                recordsList.innerHTML = '<div class="error">网络错误，请稍后重试</div>';
+            }
+        }
+
+        function renderRecords(data) {
+            const recordsList = document.getElementById('recordsList');
+            if (!data || !data.items || data.items.length === 0) {
+                recordsList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">📝</div>
+                        <div>暂无学习记录</div>
+                    </div>
+                `;
+                document.getElementById('pagination').innerHTML = '';
+                return;
+            }
+
+            totalPages = data.pages;
+            currentPage = data.current_page;
+
+            recordsList.innerHTML = data.items.map(record => `
+                <div class="record-item">
+                    <div class="record-header">
+                        <span class="record-category">${record.category}</span>
+                        <span class="record-time">${record.created_at}</span>
+                    </div>
+                    <div class="record-content">
+                        <div class="record-question">
+                            <strong>问题：</strong>${record.question}
+                        </div>
+                        <div class="record-answer">
+                            <strong>回答：</strong>${truncateText(record.ai_answer, 150)}
+                        </div>
+                    </div>
+                    <div class="record-actions">
+                        <button class="action-btn view-btn" onclick="viewRecord(${record.id})">查看详情</button>
+                        <button class="action-btn helpful-btn" onclick="toggleHelpful(${record.id}, ${record.is_helpful ? 0 : 1})">
+                            ${record.is_helpful ? '👍 已有用' : '👍 有用'}
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+
+            renderPagination();
+        }
+
+        function renderPagination() {
+            const pagination = document.getElementById('pagination');
+            if (totalPages <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+
+            let html = '';
+            
+            // 上一页
+            if (currentPage > 1) {
+                html += `<button class="page-btn" onclick="goToPage(${currentPage - 1})">&laquo; 上一页</button>`;
+            }
+
+            // 页码
+            const startPage = Math.max(1, currentPage - 2);
+            const endPage = Math.min(totalPages, startPage + 4);
+            
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})"><strong>${i}</strong></button>`;
+            }
+
+            // 下一页
+            if (currentPage < totalPages) {
+                html += `<button class="page-btn" onclick="goToPage(${currentPage + 1})">&raquo; 下一页</button>`;
+            }
+
+            pagination.innerHTML = html;
+        }
+
+        function goToPage(page) {
+            currentPage = page;
+            loadRecords();
+        }
+
+        function searchRecords() {
+            currentPage = 1;
+            loadRecords();
+        }
+
+        function handleSearchKeyPress(event) {
+            if (event.key === 'Enter') {
+                searchRecords();
+            }
+        }
+
+        function viewRecord(recordId) {
+            // 这里可以实现查看详情的逻辑
+            alert('查看记录ID: ' + recordId);
+        }
+
+        async function toggleHelpful(recordId, isHelpful) {
+            try {
+                const response = await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        record_id: recordId,
+                        is_helpful: isHelpful
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.code === 200) {
+                    // 重新加载当前页
+                    loadRecords();
+                }
+            } catch (error) {
+                console.error('反馈失败:', error);
+            }
+        }
+    </script>
+    <script src="/static/js/shared.js"></script>
+</body>
+</html>

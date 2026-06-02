@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - 智学伴</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        body {
+            font-family: "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+            background: #f5f3ef;
+            -webkit-font-smoothing: antialiased;
+        }
+        .auth-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f5f3ef;
+            padding: 20px;
+        }
+        .auth-card {
+            background: #fffef9;
+            border-radius: 24px;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04);
+            width: 100%;
+            max-width: 400px;
+            padding: 44px 40px;
+            border: 1px solid rgba(0,0,0,0.04);
+        }
+        .auth-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .auth-header .logo-icon {
+            font-size: 44px;
+            margin-bottom: 12px;
+        }
+        .auth-header h1 {
+            color: #3d3d3d;
+            font-size: 22px;
+            margin: 0 0 6px 0;
+            font-weight: 500;
+            letter-spacing: -0.3px;
+        }
+        .auth-header p {
+            color: #999;
+            font-size: 14px;
+            margin: 0;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1px solid #e8e8e8;
+            border-radius: 12px;
+            font-size: 15px;
+            transition: all 0.2s;
+            background: #fff;
+            box-sizing: border-box;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #6b8aff;
+            box-shadow: 0 0 0 3px rgba(121, 134, 203, 0.1);
+        }
+        .error-text {
+            color: #c62828;
+            font-size: 13px;
+            margin-top: 6px;
+            display: none;
+        }
+        .checkbox-group {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+        .checkbox-group label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #666;
+            cursor: pointer;
+        }
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #6b8aff;
+        }
+        .forgot-link {
+            color: #6b8aff;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .forgot-link:hover {
+            color: #4a6cf7;
+        }
+        .btn-auth {
+            width: 100%;
+            padding: 14px;
+            background: #6b8aff;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-auth:hover {
+            background: #4a6cf7;
+        }
+        .btn-auth:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .auth-footer {
+            text-align: center;
+            margin-top: 24px;
+            color: #666;
+            font-size: 14px;
+        }
+        .auth-footer a {
+            color: #6b8aff;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .auth-footer a:hover {
+            color: #4a6cf7;
+        }
+        .alert {
+            padding: 13px 16px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+            border: 1px solid transparent;
+        }
+        .alert.error {
+            background: #fff5f5;
+            color: #c62828;
+            border-color: #ffcdd2;
+        }
+        .alert.success {
+            background: #f5fdf5;
+            color: #2e7d32;
+            border-color: #c8e6c9;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <div class="logo-icon">📚</div>
+                <h1>欢迎回来</h1>
+                <p>登录智学伴，开始学习之旅</p>
+            </div>
+
+            <div id="errorAlert" class="alert error"></div>
+            <div id="successAlert" class="alert success"></div>
+
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">用户名 / 邮箱</label>
+                    <input type="text" id="username" name="username" placeholder="请输入用户名或邮箱" required>
+                    <div class="error-text" id="usernameError"></div>
+                </div>
+
+                <div class="form-group">
+                    <label for="password">密码</label>
+                    <input type="password" id="password" name="password" placeholder="请输入密码" required>
+                    <div class="error-text" id="passwordError"></div>
+                </div>
+
+                <div class="checkbox-group">
+                    <label>
+                        <input type="checkbox" id="remember" name="remember">
+                        记住我
+                    </label>
+                    <a href="/forgot-password" class="forgot-link">忘记密码？</a>
+                </div>
+
+                <button type="submit" class="btn-auth" id="loginBtn">登 录</button>
+            </form>
+
+            <div class="auth-footer">
+                还没有账号？<a href="/register">立即注册</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+    <script>
+        const loginForm = document.getElementById('loginForm');
+        const loginBtn = document.getElementById('loginBtn');
+        const errorAlert = document.getElementById('errorAlert');
+        const successAlert = document.getElementById('successAlert');
+
+        function showError(msg) {
+            errorAlert.textContent = msg;
+            errorAlert.style.display = 'block';
+            successAlert.style.display = 'none';
+        }
+
+        function showSuccess(msg) {
+            successAlert.textContent = msg;
+            successAlert.style.display = 'block';
+            errorAlert.style.display = 'none';
+        }
+
+        function hideAlerts() {
+            errorAlert.style.display = 'none';
+            successAlert.style.display = 'none';
+        }
+
+        loginForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            hideAlerts();
+
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const remember = document.getElementById('remember').checked;
+
+            if (!username || !password) {
+                showError('请填写所有字段');
+                return;
+            }
+
+            loginBtn.disabled = true;
+            loginBtn.textContent = '登录中...';
+
+            try {
+                const csrfResponse = await fetch('/api/auth/csrf-token');
+                if (!csrfResponse.ok) {
+                    throw new Error('CSRF token获取失败');
+                }
+                const csrfData = await csrfResponse.json();
+                const csrfToken = csrfData.csrf_token;
+
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken
+                    },
+                    body: JSON.stringify({ username, password, remember })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showSuccess('登录成功！正在跳转...');
+                    setAuth(data.token, data.user);
+                    setTimeout(() => {
+                        location.href = '/';
+                    }, 1000);
+                } else {
+                    showError(data.error || '登录失败');
+                    if (data.remaining_attempts) {
+                        showError(`登录失败，还可以尝试 ${data.remaining_attempts} 次`);
+                    }
+                }
+            } catch (err) {
+                showError('网络错误，请稍后重试');
+                console.error(err);
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.textContent = '登 录';
+            }
+        });
+    </script>
+</body>
+</html>

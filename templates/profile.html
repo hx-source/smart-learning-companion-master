@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人中心 - 智学伴</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preload" href="/static/js/shared.js" as="script">
+</head>
+<body>
+    <!-- 导航栏 -->
+    {% include 'components/navbar.html' %}
+
+    <!-- 主内容 -->
+    <div class="main-wrapper">
+        <main class="profile-page">
+            <div class="profile-container">
+                <!-- 页面标题 -->
+                <div class="profile-title-bar">
+                    <h1>个人中心</h1>
+                </div>
+
+                <!-- 标签页导航 -->
+                <div class="profile-tabs">
+                    <button class="tab-btn active" data-tab="profile">
+                        <span class="tab-icon">👤</span>
+                        <span class="tab-text">基本资料</span>
+                    </button>
+                    <button class="tab-btn" data-tab="security">
+                        <span class="tab-icon">🔒</span>
+                        <span class="tab-text">账号安全</span>
+                    </button>
+                    <button class="tab-btn" data-tab="api">
+                        <span class="tab-icon">🔑</span>
+                        <span class="tab-text">API管理</span>
+                    </button>
+                </div>
+
+                <!-- 标签页内容 -->
+                <div class="profile-content">
+                    <!-- 基本资料 -->
+                    <div class="tab-panel active" id="panel-profile">
+                        <div class="section-card">
+                            <div class="avatar-section">
+                                <div class="avatar-wrapper">
+                                    <button class="avatar-btn" id="profileAvatar" onclick="changeAvatar()">
+                                        <span class="avatar-img"></span>
+                                        <span class="avatar-overlay">✏️ 更换头像</span>
+                                    </button>
+                                    <input type="file" id="avatarInput" accept="image/*" style="display: none;">
+                                </div>
+                            </div>
+                            <form id="editForm" class="profile-form">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>用户名</label>
+                                        <input type="text" id="editUsername" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>邮箱</label>
+                                        <input type="email" id="editEmail" required>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>专业</label>
+                                        <input type="text" id="editMajor" placeholder="未设置">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>年级</label>
+                                        <input type="text" id="editGrade" placeholder="未设置">
+                                    </div>
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" class="btn btn-primary" id="saveProfileBtn">
+                                        <span class="btn-text">保存修改</span>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- 账号安全 -->
+                    <div class="tab-panel" id="panel-security">
+                        <div class="section-card">
+                            <h3 class="section-title">修改密码</h3>
+                            <form id="passwordForm" class="profile-form">
+                                <div class="form-group">
+                                    <label>旧密码</label>
+                                    <input type="password" id="oldPassword" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>新密码</label>
+                                    <input type="password" id="newPassword" required minlength="6">
+                                </div>
+                                <div class="form-group">
+                                    <label>确认新密码</label>
+                                    <input type="password" id="confirmPassword" required minlength="6">
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" class="btn btn-primary" id="savePasswordBtn">
+                                        <span class="btn-text">确认修改</span>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- API管理 -->
+                    <div class="tab-panel" id="panel-api">
+                        <div class="section-card">
+                            <h3 class="section-title">API密钥配置</h3>
+                            <form id="apiKeysForm" class="profile-form">
+                                <div class="form-group">
+                                    <label>DeepSeek API密钥</label>
+                                    <input type="password" id="deepseekApiKey" placeholder="sk-...">
+                                </div>
+                                <div class="form-group">
+                                    <label>Kimi API密钥</label>
+                                    <input type="password" id="kimiApiKey" placeholder="your-api-key-here">
+                                </div>
+                                <div class="form-group">
+                                    <label>智谱AI API密钥</label>
+                                    <input type="password" id="zhipuApiKey" placeholder="your-api-key-here">
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" class="btn btn-primary" id="saveApiBtn">
+                                        <span class="btn-text">保存配置</span>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // 标签页切换
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const tabName = this.dataset.tab;
+                
+                // 切换按钮状态
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                
+                // 切换面板
+                document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+                document.getElementById('panel-' + tabName).classList.add('active');
+            });
+        });
+
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', function() {
+            loadUserInfo();
+            loadApiKeys();
+        });
+
+        // 加载用户信息
+        async function loadUserInfo() {
+            const user = getCurrentUser();
+            if (!user) {
+                location.href = '/login';
+                return;
+            }
+
+            const now = Date.now();
+            if (globalCache.userInfo && (now - globalCache.lastFetch.userInfo < globalCache.cacheTime)) {
+                displayProfileUserInfo(globalCache.userInfo);
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/dashboard?user_id=${user.id}`);
+                const data = await response.json();
+                
+                if (data.code === 200) {
+                    globalCache.userInfo = data.data.user;
+                    globalCache.lastFetch.userInfo = now;
+                    displayProfileUserInfo(data.data.user);
+                    displayUserInfo(data.data.user);
+                }
+            } catch (error) {
+                console.error('加载用户信息失败:', error);
+                displayProfileUserInfo(user);
+                displayUserInfo(user);
+            }
+        }
+
+        // 显示用户信息
+        function displayProfileUserInfo(user) {
+            document.getElementById('editUsername').value = user.username;
+            document.getElementById('editEmail').value = user.email;
+            document.getElementById('editMajor').value = user.major || '';
+            document.getElementById('editGrade').value = user.grade || '';
+            
+            const avatarBtn = document.getElementById('profileAvatar');
+            
+            if (user.avatar && user.avatar.startsWith('/static/avatars/')) {
+                if (avatarBtn) {
+                    avatarBtn.style.backgroundImage = `url(${user.avatar}?t=${Date.now()})`;
+                    avatarBtn.style.backgroundSize = 'cover';
+                    avatarBtn.style.backgroundPosition = 'center';
+                    avatarBtn.querySelector('.avatar-img').textContent = '';
+                }
+            } else {
+                if (avatarBtn) {
+                    avatarBtn.style.backgroundImage = 'none';
+                    avatarBtn.querySelector('.avatar-img').textContent = user.username.charAt(0).toUpperCase();
+                }
+            }
+        }
+
+        // 加载API密钥
+        async function loadApiKeys() {
+            try {
+                const token = localStorage.getItem('token');
+                const response = await fetch('/api/auth/api-keys', {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                const apiKeys = await response.json();
+                if (apiKeys.code === 200) {
+                    document.getElementById('deepseekApiKey').value = apiKeys.deepseek_api_key || '';
+                    document.getElementById('kimiApiKey').value = apiKeys.kimi_api_key || '';
+                    document.getElementById('zhipuApiKey').value = apiKeys.zhipu_api_key || '';
+                }
+            } catch (error) {
+                console.error('加载API密钥配置失败:', error);
+            }
+        }
+
+        // 更改头像
+        function changeAvatar() {
+            document.getElementById('avatarInput').click();
+        }
+
+        // 头像文件选择处理
+        document.getElementById('avatarInput').addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const user = getCurrentUser();
+            if (!user) return;
+
+            const formData = new FormData();
+            formData.append('user_id', user.id);
+            formData.append('avatar', file);
+
+            const btn = document.getElementById('profileAvatar');
+            btn.classList.add('loading');
+
+            try {
+                const response = await fetch('/api/user/profile', {
+                    method: 'PUT',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                if (result.code === 200) {
+                    const updatedUser = { ...user, avatar: result.data.avatar };
+                    localStorage.setItem('user', JSON.stringify(updatedUser));
+                    globalCache.userInfo = null;
+                    
+                    const avatarUrl = `${updatedUser.avatar}?t=${Date.now()}`;
+                    
+                    const navAvatar = document.getElementById('navAvatar');
+                    if (navAvatar) {
+                        navAvatar.style.backgroundImage = `url(${avatarUrl})`;
+                        navAvatar.style.backgroundSize = 'cover';
+                        navAvatar.style.backgroundPosition = 'center';
+                        navAvatar.textContent = '';
+                    }
+                    
+                    if (btn) {
+                        btn.style.backgroundImage = `url(${avatarUrl})`;
+                        btn.style.backgroundSize = 'cover';
+                        btn.style.backgroundPosition = 'center';
+                        btn.querySelector('.avatar-img').textContent = '';
+                    }
+                }
+            } catch (error) {
+                console.error('头像更新失败:', error);
+            }
+            
+            btn.classList.remove('loading');
+        });
+
+        // 编辑资料表单提交
+        document.getElementById('editForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const user = getCurrentUser();
+            if (!user) return;
+
+            const btn = document.getElementById('saveProfileBtn');
+            btn.classList.add('loading');
+            btn.querySelector('.btn-text').textContent = '保存中...';
+            btn.disabled = true;
+
+            const formData = new FormData();
+            formData.append('user_id', user.id);
+            formData.append('username', document.getElementById('editUsername').value);
+            formData.append('email', document.getElementById('editEmail').value);
+            formData.append('major', document.getElementById('editMajor').value);
+            formData.append('grade', document.getElementById('editGrade').value);
+
+            try {
+                const response = await fetch('/api/user/profile', {
+                    method: 'PUT',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                if (result.code === 200) {
+                    btn.querySelector('.btn-text').textContent = '已保存 ✓';
+                    btn.classList.remove('loading');
+                    btn.classList.add('success');
+                    
+                    const updatedUser = { 
+                        ...user, 
+                        username: document.getElementById('editUsername').value,
+                        email: document.getElementById('editEmail').value,
+                        major: document.getElementById('editMajor').value,
+                        grade: document.getElementById('editGrade').value
+                    };
+                    localStorage.setItem('user', JSON.stringify(updatedUser));
+                    globalCache.userInfo = null;
+                    loadUserInfo();
+                } else {
+                    btn.querySelector('.btn-text').textContent = '保存失败';
+                    btn.classList.remove('loading');
+                    btn.classList.add('error');
+                }
+            } catch (error) {
+                btn.querySelector('.btn-text').textContent = '网络错误';
+                btn.classList.remove('loading');
+                btn.classList.add('error');
+            }
+            
+            setTimeout(() => {
+                btn.querySelector('.btn-text').textContent = '保存修改';
+                btn.classList.remove('success', 'error');
+                btn.disabled = false;
+            }, 1500);
+        });
+
+        // 修改密码表单提交
+        document.getElementById('passwordForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const newPassword = document.getElementById('newPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+
+            if (newPassword !== confirmPassword) {
+                document.getElementById('confirmPassword').style.borderColor = '#ef4444';
+                return;
+            }
+            document.getElementById('confirmPassword').style.borderColor = '';
+
+            const btn = document.getElementById('savePasswordBtn');
+            btn.classList.add('loading');
+            btn.querySelector('.btn-text').textContent = '处理中...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/api/auth/password/change', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        old_password: document.getElementById('oldPassword').value,
+                        new_password: newPassword
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.code === 200) {
+                    btn.querySelector('.btn-text').textContent = '已修改 ✓';
+                    btn.classList.remove('loading');
+                    btn.classList.add('success');
+                    document.getElementById('passwordForm').reset();
+                } else {
+                    btn.querySelector('.btn-text').textContent = '修改失败';
+                    btn.classList.remove('loading');
+                    btn.classList.add('error');
+                }
+            } catch (error) {
+                btn.querySelector('.btn-text').textContent = '网络错误';
+                btn.classList.remove('loading');
+                btn.classList.add('error');
+            }
+            
+            setTimeout(() => {
+                btn.querySelector('.btn-text').textContent = '确认修改';
+                btn.classList.remove('success', 'error');
+                btn.disabled = false;
+            }, 1500);
+        });
+
+        // API密钥表单提交
+        document.getElementById('apiKeysForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const btn = document.getElementById('saveApiBtn');
+            btn.classList.add('loading');
+            btn.querySelector('.btn-text').textContent = '保存中...';
+            btn.disabled = true;
+
+            const data = {
+                deepseek_api_key: document.getElementById('deepseekApiKey').value,
+                kimi_api_key: document.getElementById('kimiApiKey').value,
+                zhipu_api_key: document.getElementById('zhipuApiKey').value
+            };
+
+            try {
+                const token = localStorage.getItem('token');
+                function getCookie(name) {
+                    const value = `; ${document.cookie}`;
+                    const parts = value.split(`; ${name}=`);
+                    if (parts.length === 2) return parts.pop().split(';').shift();
+                }
+                const csrfToken = getCookie('csrf_token');
+                
+                const response = await fetch('/api/auth/api-keys', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`,
+                        'X-CSRF-Token': csrfToken
+                    },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                
+                if (result.message === 'API密钥配置已更新') {
+                    btn.querySelector('.btn-text').textContent = '已保存 ✓';
+                    btn.classList.remove('loading');
+                    btn.classList.add('success');
+                } else {
+                    btn.querySelector('.btn-text').textContent = '保存失败';
+                    btn.classList.remove('loading');
+                    btn.classList.add('error');
+                }
+            } catch (error) {
+                btn.querySelector('.btn-text').textContent = '网络错误';
+                btn.classList.remove('loading');
+                btn.classList.add('error');
+            }
+            
+            setTimeout(() => {
+                btn.querySelector('.btn-text').textContent = '保存配置';
+                btn.classList.remove('success', 'error');
+                btn.disabled = false;
+            }, 1500);
+        });
+
+        // ESC键关闭模态框
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            }
+        });
+    </script>
+    <script src="/static/js/shared.js"></script>
+    
+    <!-- profile.html 专属的初始化代码 -->
+    <script>
+        // 确保在 shared.js 加载完成后执行
+        document.addEventListener('DOMContentLoaded', function() {
+            // shared.js 已经会自动调用 initPage()
+            // 这里只需要确保 profile.html 特有的功能正常工作
+            console.log('个人中心页面已加载');
+        });
+    </script>
+</body>
+</html>

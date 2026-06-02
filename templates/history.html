@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>历史记录 - 知识板</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>知识板</h1>
+            <nav>
+                <a href="/">首页</a>
+                <a href="/records">学习记录</a>
+                <a href="/profile">个人中心</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="card">
+            <h2>问答历史记录</h2>
+            <div id="historyContainer">
+                <p class="loading">加载中...</p>
+            </div>
+        </div>
+    </main>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script>
+        async function loadHistory() {
+            const container = document.getElementById('historyContainer');
+            const userId = 1;
+
+            try {
+                const data = await apiRequest('/ask/history?user_id=' + userId);
+                if (data.length === 0) {
+                    container.innerHTML = '<p>暂无历史记录</p>';
+                    return;
+                }
+                container.innerHTML = data.map(item => `
+                    <div class="card" style="background: #f9f9f9;">
+                        <p><strong>问题：</strong>${item.question}</p>
+                        <p><strong>回答：</strong>${item.answer}</p>
+                        <p><strong>评分：</strong>${item.score || 'N/A'}</p>
+                        <p><small>时间：${new Date(item.created_at).toLocaleString()}</small></p>
+                    </div>
+                `).join('');
+            } catch (error) {
+                container.innerHTML = '';
+                container.appendChild(showError(error.message));
+            }
+        }
+
+        loadHistory();
+    </script>
+</body>
+</html>
