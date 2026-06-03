@@ -1,19 +1,21 @@
 import os
 from app.services.knowledge_service import QAModule
 
-# 模拟调用 /api/knowledge-base/list 端点的逻辑
+# 模拟调用 /api/knowledge-base/list 端点的逻辑。
+# 这个脚本用于本地排查“知识库文件已经存在，但列表页没有显示”的问题。
 def check_knowledge_bases():
+    """扫描当前目录中的向量库文件，并验证测试知识库是否能被发现。"""
     print("检查知识库列表...")
     
     # 扫描文件系统中的知识库文件
     knowledge_bases = []
     for file in os.listdir('.'):
         if file.endswith('_vector_store.pkl'):
-            # 提取知识库名称
+            # 提取知识库名称：knowledge_base_xxx_vector_store.pkl -> xxx。
             kb_name = file.replace('knowledge_base_', '').replace('_vector_store.pkl', '')
             if kb_name not in knowledge_bases:
                 knowledge_bases.append(kb_name)
-                # 初始化知识库
+                # 初始化知识库，确保 QAModule 的实例缓存也包含这个知识库。
                 QAModule(kb_name)
     
     # 确保默认知识库存在

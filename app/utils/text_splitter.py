@@ -1,7 +1,15 @@
+"""文本切分工具。
+
+向量检索通常不直接把整篇文档做成一个向量，而是按页、段落、句子拆成
+较小片段。这样召回结果更精确，也能减少传给大模型的上下文长度。
+"""
+
 import re
 
 
 class TextSplitter:
+    """将长文本切成适合向量化和检索的小块。"""
+
     def __init__(self, chunk_size=500, chunk_overlap=100):
         """初始化文本分块器
 
@@ -24,10 +32,11 @@ class TextSplitter:
         if not text:
             return []
 
-        # 预处理文本，规范化换行符和空格
+        # 预处理文本，规范化换行符和空格，减少无意义空白对切块的影响。
         text = self._preprocess_text(text)
 
-        # 按页面分割（基于"=== 第 X 页 ==="标记）
+        # 按页面分割（基于 "=== 第 X 页 ===" 标记）。
+        # FileProcessor 在 PDF 解析时会插入该标记，便于保留页级边界。
         pages = self._split_by_pages(text)
         chunks = []
 
@@ -76,7 +85,7 @@ class TextSplitter:
             if not paragraph.strip():
                 continue
 
-            # 如果当前段落长度超过分块大小，单独处理
+            # 如果当前段落长度超过分块大小，单独按句子/固定窗口处理。
             if paragraph_length > self.chunk_size:
                 # 处理超长段落
                 sub_chunks = self._split_long_paragraph(paragraph)
@@ -91,7 +100,8 @@ class TextSplitter:
                 # 保存当前分块
                 chunks.append('\n'.join(current_chunk))
 
-                # 计算重叠部分
+                # 计算重叠部分。
+                # 相邻块保留少量共同文本，能减少答案跨块时的信息断裂。
                 overlap = []
                 if current_chunk and self.chunk_overlap > 0:
                     overlap_length = 0
@@ -121,9 +131,9 @@ class TextSplitter:
         Returns:
             预处理后的文本
         """
-        # 替换连续的换行符为单个换行符
+        # 替换连续的换行符为单个换行符。
         text = '\n'.join([line.strip() for line in text.split('\n') if line.strip()])
-        # 替换连续的空格为单个空格
+        # 替换连续的空格为单个空格。
         text = re.sub(r'\s+', ' ', text)
         return text
 
@@ -137,6 +147,7 @@ class TextSplitter:
             分割后的子段落列表
         """
         chunks = []
+        # 保留中英文句末标点，让子块尽量在自然句边界结束。
         sentences = re.split(r'([。！？.!?])', paragraph)
 
         current_chunk = ""

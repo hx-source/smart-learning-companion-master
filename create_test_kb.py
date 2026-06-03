@@ -1,13 +1,14 @@
 from app.services.knowledge_service import QAModule
 
-# 创建测试知识库
+# 创建测试知识库。
+# 这个脚本用于验证向量库文件是否能持久化到磁盘，并在应用重启后重新被扫描出来。
 test_kb_name = "test_persistence"
 print(f"创建测试知识库: {test_kb_name}")
 
 # 初始化知识库
 qa_module = QAModule(test_kb_name)
 
-# 添加一个简单的文档
+# 添加一个简单的文档。add_document 会读取该文件、切块、生成嵌入并写入向量库。
 test_content = "这是测试知识库持久化的内容"
 test_file_path = f"{test_kb_name}_test.txt"
 

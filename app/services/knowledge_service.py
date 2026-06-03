@@ -1,3 +1,10 @@
+"""知识库问答服务。
+
+这个模块把 RAG（检索增强生成）流程串起来：
+上传文档 -> 提取文本 -> 切分片段 -> 生成嵌入 -> 写入 Faiss ->
+提问时召回片段 -> 可选重排 -> 拼接上下文 -> 调用大模型生成答案。
+"""
+
 import requests
 import os
 from dotenv import load_dotenv
@@ -9,8 +16,13 @@ load_dotenv()
 
 
 class QAModule:
+    """单个知识库的问答模块。
+
+    每个知识库名称对应一个 QAModule 实例，避免不同知识库的向量文件、
+    上传目录和会话状态互相混用。
+    """
     _initialized = False
-    _instances = {}  # 存储不同知识库的实例
+    _instances = {}  # 存储不同知识库的实例，实现“按知识库名称单例”。
     
     def __new__(cls, knowledge_base_name="default", model_type="ollama"):
         """创建或获取知识库实例
@@ -31,6 +43,7 @@ class QAModule:
             model_type: 模型类型 (api 或 ollama)
         """
         if not hasattr(self, 'initialized'):
+            # 这些成员只在首次创建实例时初始化；后续从 _instances 取出时不重复加载。
             self.knowledge_base_name = knowledge_base_name
             self.model_type = model_type
             self.embedding_model = EmbeddingModel()
@@ -65,13 +78,13 @@ class QAModule:
         if history:
             self.chat_history = history
 
-        # 生成问题的嵌入向量
+        # 生成问题的嵌入向量，后续用它和文档片段向量做相似度搜索。
         query_embedding = self.embedding_model.get_embedding(question)
 
         # 搜索相关文档
         search_results = self.vector_store.search(query_embedding, n_results=5)
 
-        # 构建上下文
+        # 将召回的文档片段拼接成上下文，交给生成模型参考。
         context = self._build_context(search_results)
 
         # 构建提示词
@@ -97,13 +110,13 @@ class QAModule:
         Returns:
             dict: 包含 answer 和 sources 的字典
         """
-        # 生成问题的嵌入向量
+        # 生成问题的嵌入向量，后续进入“召回 + 重排 + 生成”流程。
         query_embedding = self.embedding_model.get_embedding(question)
 
-        # 搜索相关文档（召回阶段）
+        # 搜索相关文档（召回阶段）：先取更多候选，给重排阶段留下选择空间。
         search_results = self.vector_store.search(query_embedding, n_results=10)  # 先召回更多文档
 
-        # 重排阶段（如果启用）
+        # 重排阶段（如果启用）：用生成/评分模型重新判断候选片段和问题的相关性。
         if self.use_reranker and self.reranker:
             search_results = self.reranker.rerank_with_metadata(
                 question, 
@@ -111,7 +124,7 @@ class QAModule:
                 top_k=5  # 重排后保留 top 5
             )
 
-        # 构建上下文
+        # 将召回的文档片段拼接成上下文，交给生成模型参考。
         context = self._build_context(search_results)
 
         # 构建提示词
@@ -120,7 +133,7 @@ class QAModule:
         # 调用LLM生成回答
         answer = self._call_llm(prompt, model_type)
 
-        # 构建来源信息
+        # 构建来源信息：前端可展示“答案参考了哪些文档片段”。
         sources = []
         if search_results and 'documents' in search_results and search_results['documents'][0]:
             # 检查是否有重排分数
@@ -165,6 +178,7 @@ class QAModule:
         """
         context = []
         if search_results and 'documents' in search_results:
+            # search_results 的结构对齐 Chroma 风格：外层列表表示一次查询的结果集。
             for doc in search_results['documents'][0]:
                 if doc:
                     context.append(doc)
@@ -181,6 +195,7 @@ class QAModule:
             提示词
         """
         if context.strip():
+            # 有知识库上下文时，提示词要求模型优先基于文档回答，减少自由发挥。
             prompt = f"""你是一个智能知识库助手，根据提供的上下文回答用户问题。
 
 上下文：
@@ -195,6 +210,7 @@ class QAModule:
 
 请确保回答准确、完整，包括所有相关的细节。"""
         else:
+            # 没有召回到上下文时，降级为普通学习助手回答。
             prompt = f"""你是一个智能学习助手，请回答用户的问题。
 
 用户问题：
@@ -214,7 +230,7 @@ class QAModule:
         Returns:
             回答
         """
-        # 确定使用的模型类型
+        # 确定使用的模型类型：接口参数优先，其次使用实例默认值。
         use_model_type = model_type or self.model_type
         
         try:
@@ -268,7 +284,8 @@ class QAModule:
         from app.utils.text_splitter import TextSplitter
 
         try:
-            # 先删除该文件的旧向量（如果存在）
+            # 先删除该文件的旧向量（如果存在）。
+            # 这样同名文件重复上传时不会留下旧片段，避免检索结果重复或过期。
             self.delete_by_source(file_path)
             
             # 读取文件
@@ -286,7 +303,7 @@ class QAModule:
             # 生成嵌入向量
             embeddings = self.embedding_model.get_batch_embeddings(chunks)
 
-            # 准备元数据
+            # 准备元数据：每个文本块都记录来源文件和块序号，便于前端展示和按文件删除。
             metadatas = []
             for i, chunk in enumerate(chunks):
                 chunk_metadata = metadata.copy() if metadata else {}
@@ -303,7 +320,7 @@ class QAModule:
             return False
 
     def get_stats(self):
-        """获取知识库统计信息"""
+        """获取知识库统计信息，供管理页展示向量数量、文档数量和向量维度。"""
         total_vectors = self.vector_store.count()
 
         # 计算文档总数（去重）
@@ -327,7 +344,10 @@ class QAModule:
         return True
 
     def delete_knowledge_base(self):
-        """删除知识库"""
+        """删除知识库。
+
+        同时移除向量持久化文件、上传文件夹和内存中的实例缓存。
+        """
         # 删除向量库文件
         self.vector_store.delete_store()
         
@@ -350,7 +370,11 @@ class QAModule:
         return True
 
     def rename_knowledge_base(self, new_name):
-        """重命名知识库"""
+        """重命名知识库。
+
+        名称变化会影响向量文件名、上传目录和元数据中的文件路径，
+        因此需要三处一起更新，保证后续检索和删除仍能定位到来源文件。
+        """
         from flask import current_app
 
         # 重命名向量库
@@ -379,7 +403,7 @@ class QAModule:
         old_name = self.knowledge_base_name
         self.knowledge_base_name = new_name
 
-        # 更新实例字典
+        # 更新实例字典，保证之后用新名称获取到的仍是当前实例。
         if old_name in QAModule._instances:
             QAModule._instances[new_name] = QAModule._instances[old_name]
             del QAModule._instances[old_name]
@@ -399,7 +423,7 @@ class QAModule:
         """
         all_vectors = self.vector_store.get_all_vectors()
         
-        # 按来源筛选
+        # 按来源筛选：来源路径来自 URL，Windows 路径分隔符需要统一后再比较。
         if source:
             # 解码URL编码的文件路径
             import urllib.parse
@@ -451,7 +475,7 @@ class QAModule:
         # 调试信息
         print("\n=== File sources debugging ===")
         
-        # 按文件路径分组并统计数量
+        # 按文件路径分组并统计数量，一个文件通常会被切成多个向量片段。
         sources = {}
         for vector in all_vectors:
             file_path = vector.get('metadata', {}).get('file_path', '未知来源')
@@ -492,9 +516,10 @@ class QAModule:
         """
         all_vectors = self.vector_store.get_all_vectors()
         
-        # 找出该文件来源的所有向量ID
+        # 找出该文件来源的所有向量 ID；后续交给 VectorStore 统一删除并重建索引。
         ids_to_delete = []
-        # 统一路径分隔符，处理Windows和Unix路径的差异
+        # 统一路径分隔符，处理 Windows 和 Unix 路径的差异。
+        # 上传、浏览器传参、后端保存元数据时可能混用 / 和 \。
         normalized_file_path = file_path.replace('/', '\\').replace('\\\\', '\\')
         
         # 调试信息

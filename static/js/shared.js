@@ -1,4 +1,11 @@
-// 全局缓存对象
+/**
+ * 跨页面共享脚本。
+ *
+ * 负责导航栏用户信息、模型状态、聊天历史缓存和历史记录渲染。
+ * 多个模板都会加载这个文件，因此这里的函数尽量保持通用、无页面强绑定。
+ */
+
+// 全局缓存对象：避免用户在首页/历史页之间切换时频繁请求同一批数据。
 const globalCache = {
     userInfo: null,
     modelStatus: null,
@@ -12,14 +19,14 @@ const globalCache = {
     cacheTime: 10 * 60 * 1000 // 缓存时间：10分钟
 };
 
-// 从cookie中获取值
+// 从 cookie 中获取值，供需要读取 token/csrf_token 的页面复用。
 function getCookie(name) {
     const value = `; ${document.cookie}`;
     const parts = value.split(`; ${name}=`);
     if (parts.length === 2) return parts.pop().split(';').shift();
 }
 
-// 页面加载完成后执行
+// 页面加载完成后执行：先显示用户和模型状态，再根据页面类型预加载数据。
 function initPage() {
     loadUserInfoAndModelStatus();
     
@@ -32,7 +39,7 @@ function initPage() {
     // 其他页面特定的初始化逻辑由页面自身处理
 }
 
-// 预加载数据
+// 预加载数据：延迟加载聊天历史，避免阻塞首页首屏渲染。
 async function preloadData() {
     const user = getCurrentUser();
     if (!user) return;
@@ -49,7 +56,7 @@ async function preloadData() {
     }
 }
 
-// 获取当前用户信息
+// 获取当前用户信息：localStorage 可能为空或被手动改坏，因此需要 try/catch。
 function getCurrentUser() {
     try {
         return JSON.parse(localStorage.getItem('user'));
@@ -58,7 +65,8 @@ function getCurrentUser() {
     }
 }
 
-// 加载用户信息和模型状态（使用综合API）
+// 加载用户信息和模型状态（使用综合 API）。
+// 先用本地缓存快速渲染，再在后台刷新后端数据，兼顾速度和准确性。
 async function loadUserInfoAndModelStatus() {
     const user = getCurrentUser();
     
@@ -70,7 +78,7 @@ async function loadUserInfoAndModelStatus() {
         const now = Date.now();
         if (!globalCache.userInfo || (now - globalCache.lastFetch.userInfo > globalCache.cacheTime)) {
             try {
-                // 使用综合API端点
+                // 使用综合 API 端点，一次请求拿到用户信息和模型状态。
                 const response = await fetch(`/api/dashboard?user_id=${user.id}`);
                 const data = await response.json();
                 
@@ -103,7 +111,7 @@ async function loadUserInfoAndModelStatus() {
     }
 }
 
-// 显示用户信息
+// 显示用户信息：导航栏头像优先展示用户上传图片，否则显示用户名首字母。
 function displayUserInfo(user) {
     const userInfoEl = document.getElementById('userInfo');
     const usernameEl = document.getElementById('username');
@@ -114,7 +122,7 @@ function displayUserInfo(user) {
         if (usernameEl) usernameEl.textContent = user.username;
         if (avatarEl) {
             if (user.avatar && user.avatar.startsWith('/static/avatars/')) {
-                // 添加随机参数避免浏览器缓存
+                // 添加随机参数避免浏览器缓存，头像更新后能立即看到新图。
                 const avatarUrl = `${user.avatar}?t=${Date.now()}`;
                 avatarEl.style.backgroundImage = `url(${avatarUrl})`;
                 avatarEl.style.backgroundSize = 'cover';
@@ -141,7 +149,7 @@ function logout() {
     location.href = '/login';
 }
 
-// 检查模型状态
+// 检查模型状态：10 分钟内优先使用缓存，请求失败时也尽量保留旧状态展示。
 async function checkModelStatus() {
     const now = Date.now();
     
@@ -169,7 +177,7 @@ async function checkModelStatus() {
     }
 }
 
-// 更新模型状态
+// 更新模型状态：根据当前选择的模型类型显示本地/云端可用状态。
 function updateModelStatus(status) {
     const statusEl = document.getElementById('modelStatus');
     if (statusEl) {
@@ -184,7 +192,7 @@ function updateModelStatus(status) {
     }
 }
 
-// 加载聊天历史
+// 加载聊天历史：会话列表缓存 10 分钟，减少频繁切换页面时的数据库压力。
 async function loadChatHistory() {
     // 检查缓存是否有效
     const now = Date.now();
@@ -209,7 +217,7 @@ async function loadChatHistory() {
     }
 }
 
-// 渲染聊天历史
+// 渲染聊天历史：把后端按 session 分组后的数据转换成侧边栏列表。
 function renderChatHistory(sessions) {
     const historyList = document.getElementById('historyList');
     if (!historyList) return;

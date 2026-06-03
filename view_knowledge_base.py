@@ -1,6 +1,7 @@
 import pickle
 
-# 读取知识库文件
+# 读取默认知识库文件。
+# 这是本地排查脚本，用于直接查看 pickle 中保存的文档片段、元数据和 ID。
 file_path = './knowledge_base_default_vector_store.pkl'
 
 print(f"读取知识库文件: {file_path}")
@@ -14,7 +15,7 @@ try:
     print(f"元数据数量: {len(data.get('metadatas', []))}")
     print(f"ID数量: {len(data.get('ids', []))}")
     
-    # 打印前几个文档的内容
+    # 打印前几个文档的内容，避免一次性把大型知识库全部刷到终端。
     documents = data.get('documents', [])
     metadatas = data.get('metadatas', [])
     ids = data.get('ids', [])

@@ -1,15 +1,21 @@
-"""
-AI服务 - 支持 Ollama 本地模型 / DeepSeek / Kimi / 智谱AI
+"""AI 问答服务。
+
+封装本地 Ollama 和云端 API 的调用细节。上层路由只关心“传入问题、
+得到回答”，不需要知道当前用户使用的是本地模型还是 API Key。
 """
 import os
 import requests
 from flask import current_app
 
 class AIService:
-    """AI服务类"""
+    """AI 服务类。
+
+    配置优先级为：用户个人配置 > 请求指定模型类型 > 系统默认配置。
+    """
     _initialized = False
     
     def __init__(self):
+        # 各模型的默认连接信息；API Key 会在 init_config 或用户配置中补齐。
         self.deepssek_config = {
             'api_key': None,
             'base_url': 'https://api.deepseek.com',
@@ -32,7 +38,7 @@ class AIService:
         }
     
     def init_config(self):
-        """从配置初始化"""
+        """从 Flask 配置初始化服务级默认值。"""
         from flask import current_app
         self.deepssek_config['api_key'] = current_app.config.get('DEEPSEEK_API_KEY')
         self.kimi_config['api_key'] = current_app.config.get('KIMI_API_KEY')
@@ -70,7 +76,7 @@ class AIService:
         answer = ""
         model_used = "unknown"
         
-        # 优先使用用户的配置
+        # 优先使用用户的配置：支持不同用户分别选择本地模型或自己的 API Key。
         use_ollama = self.ollama_config['enabled']
         deepseek_api_key = self.deepssek_config['api_key']
         
@@ -80,8 +86,10 @@ class AIService:
             # 可以在这里添加其他模型的API密钥使用
         
         if model_type == "ollama":
+            # 路由显式指定本地模型时，覆盖默认/用户配置。
             use_ollama = True
         elif model_type == "api":
+            # 路由显式指定云端 API 时，关闭 Ollama 分支。
             use_ollama = False
         
         if use_ollama:
@@ -116,7 +124,10 @@ class AIService:
         }
     
     def _call_ollama(self, system_prompt, user_prompt):
-        """调用 Ollama 本地模型"""
+        """调用 Ollama 本地模型。
+
+        使用 `/api/chat`，消息格式与常见 Chat Completions 接近。
+        """
         try:
             url = f"{self.ollama_config['base_url']}/api/chat"
             data = {
@@ -132,7 +143,7 @@ class AIService:
                 }
             }
             
-            # 禁用代理
+            # 禁用代理，避免本地 Ollama 请求被系统代理转发导致连接失败。
             proxies = {"http": None, "https": None}
             response = requests.post(url, json=data, timeout=120, proxies=proxies)
             
@@ -148,9 +159,12 @@ class AIService:
             return f"Ollama API 调用失败: {str(e)}"
     
     def _call_deepseek(self, system_prompt, user_prompt):
-        """调用DeepSeek API - 使用requests直接发送"""
+        """调用 DeepSeek API。
+
+        这里直接使用 requests，方便显式清理代理环境变量并控制超时。
+        """
         try:
-            # 清除所有可能的代理环境变量
+            # 清除所有可能的代理环境变量，减少校园网/本机代理对 API 调用的影响。
             for var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 
                         'HTTP', 'HTTPS', 'ALL_PROXY', 'all_proxy', 'NO_PROXY']:
                 os.environ.pop(var, None)

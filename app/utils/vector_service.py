@@ -1,6 +1,7 @@
-"""
-向量服务模块
-包含向量嵌入和向量存储功能
+"""向量服务模块。
+
+EmbeddingModel 负责把文本转成向量；VectorStore 负责把文本、元数据和
+Faiss 索引持久化到本地文件。知识库问答时会通过这里完成相似片段召回。
 """
 import requests
 import os
@@ -13,7 +14,11 @@ from config import Config
 load_dotenv()
 
 class EmbeddingModel:
-    """向量嵌入模型"""
+    """向量嵌入模型。
+
+    优先调用 Ollama 的嵌入模型；如果 Ollama 不可用，则使用字符哈希生成
+    一个可用但效果较弱的 fallback 向量，保证项目功能不会直接崩溃。
+    """
     _initialized = False
     
     def __init__(self, model_name=None):
@@ -24,7 +29,7 @@ class EmbeddingModel:
         """
         self.model_name = model_name or Config.OLLAMA_EMBEDDING_MODEL
         self.use_ollama = True
-        self.vector_dimension = 1024  # bge-m3 模型的向量维度
+        self.vector_dimension = 1024  # bge-m3 模型的默认向量维度，首次连通后会按实际返回值修正。
 
         # 配置Ollama客户端
         ollama_url = Config.OLLAMA_BASE_URL
@@ -35,7 +40,7 @@ class EmbeddingModel:
             pass
 
         try:
-            # 测试Ollama连接
+            # 测试 Ollama 连接，同时用一段文本探测真实向量维度。
             response = requests.get(f"{ollama_url}/api/tags", timeout=10)
             if response.status_code == 200:
                 # 移除重复的打印语句
@@ -53,7 +58,7 @@ class EmbeddingModel:
                 print(f"Ollama连接失败: {str(e)}")
                 print("使用默认的嵌入方法")
             self.use_ollama = False
-            # 设置默认向量维度
+            # 设置默认向量维度，后续 fallback_embedding 会按这个维度生成向量。
             self.vector_dimension = 512
         
         EmbeddingModel._initialized = True
@@ -85,7 +90,8 @@ class EmbeddingModel:
                 if response.status_code == 200:
                     result = response.json()
                     embedding = result.get('embedding', [])
-                    # 确保返回的向量维度一致
+                    # 确保返回的向量维度一致。
+                    # Faiss 索引要求所有向量维度完全相同，过长截断，过短补零。
                     if len(embedding) != self.vector_dimension:
                         # 调整向量维度
                         if len(embedding) > self.vector_dimension:
@@ -97,10 +103,10 @@ class EmbeddingModel:
                     raise Exception(f"Ollama API返回错误: {response.status_code}")
             except Exception as e:
                 print(f"Ollama嵌入失败: {str(e)}")
-                # 使用基于字符的哈希作为 fallback，确保向量维度一致
+                # 使用基于字符的哈希作为 fallback，确保向量维度一致。
                 return self._fallback_embedding(text)
         else:
-            # 使用基于字符的哈希作为 fallback
+            # 使用基于字符的哈希作为 fallback。
             return self._fallback_embedding(text)
 
     def get_batch_embeddings(self, texts, batch_size=8):
@@ -140,7 +146,8 @@ class EmbeddingModel:
         Returns:
             嵌入向量
         """
-        # 使用字符哈希生成固定维度的向量
+        # 使用字符哈希生成固定维度的向量。
+        # 这种方式不能替代语义嵌入，但能在本地模型不可用时维持检索流程可运行。
         embedding = [0.0] * self.vector_dimension
         for i, char in enumerate(text):
             # 使用字符的Unicode码点作为种子
@@ -156,7 +163,11 @@ class EmbeddingModel:
         return embedding
 
 class VectorStore:
-    """向量存储"""
+    """本地向量存储。
+
+    文档内容、元数据、ID 存在 pickle 文件中；相似度索引存在 Faiss index 文件中。
+    两者必须保持同步，因此新增/删除/重命名后都会立即保存。
+    """
     _initialized = False
     
     def __init__(self, collection_name="knowledge_base"):
@@ -169,13 +180,13 @@ class VectorStore:
         self.data_file = f"./{collection_name}_vector_store.pkl"
         self.index_file = f"./{collection_name}_faiss.index"
 
-        # 文档和元数据存储
+        # 文档和元数据存储：Faiss 只存向量索引，不保存原文和来源信息。
         self.documents = []
         self.metadatas = []
         self.ids = []
         self.vector_dimension = 1024  # bge-m3 模型的向量维度
 
-        # 初始化 Faiss 索引
+        # 初始化 Faiss 索引。使用内积索引前会先归一化向量，效果等价于余弦相似度。
         self._init_faiss_index()
 
         # 加载已有数据
@@ -236,7 +247,10 @@ class VectorStore:
             print(f"保存数据失败: {str(e)}")
 
     def _normalize_vectors(self, vectors):
-        """归一化向量（用于余弦相似度）"""
+        """归一化向量（用于余弦相似度）。
+
+        IndexFlatIP 计算内积；把向量归一化后，内积就可以作为余弦相似度使用。
+        """
         vectors = np.array(vectors, dtype=np.float32)
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         norms = np.where(norms == 0, 1, norms)  # 避免除零
@@ -259,7 +273,7 @@ class VectorStore:
         if not metadatas:
             metadatas = [{} for _ in range(len(documents))]
 
-        # 归一化向量
+        # 归一化向量后再进入 Faiss，保证搜索分数和 query 侧处理方式一致。
         normalized_embeddings = self._normalize_vectors(embeddings)
 
         # 添加到 Faiss 索引
@@ -296,7 +310,7 @@ class VectorStore:
         # 使用 Faiss 搜索
         distances, indices = self.index.search(query_vec, n_results)
 
-        # Faiss 返回的是内积，转换为距离（1 - 相似度）
+        # Faiss 返回的是内积相似度，这里转换为距离（1 - 相似度），兼容上层展示逻辑。
         distances = 1 - distances
 
         result_indices = indices[0]
@@ -343,7 +357,7 @@ class VectorStore:
                     self.documents[index] = documents[i]
                 if metadatas:
                     self.metadatas[index] = metadatas[i]
-                # 注意：Faiss 不支持直接更新，需要重建索引
+                # 注意：Faiss 不支持原地更新向量。需要更新文本语义时，应删除后重新添加。
                 if embeddings:
                     print("警告: Faiss 索引不支持直接更新向量，请删除后重新添加")
 
@@ -370,7 +384,7 @@ class VectorStore:
                     if existing_id == id:
                         indices_to_delete.append(i)
         
-        # 按降序排序，确保从后往前删除
+        # 按降序排序，从后往前删列表元素，避免前面的删除改变后续索引位置。
         indices_to_delete = sorted(list(set(indices_to_delete)), reverse=True)
 
         for index in indices_to_delete:
@@ -378,7 +392,7 @@ class VectorStore:
             del self.metadatas[index]
             del self.ids[index]
 
-        # Faiss 不支持直接删除，需要重建索引
+        # Faiss 不支持直接删除，需要用剩余文档重新生成向量并重建索引。
         self._rebuild_index()
         self._save_data()
         deleted_count = len(indices_to_delete)
@@ -394,7 +408,8 @@ class VectorStore:
 
         # 如果有文档，重新添加
         if self.documents:
-            # 重新生成所有文档的嵌入向量
+            # 重新生成所有文档的嵌入向量。
+            # 这是删除/批量调整后的保守做法，速度慢一些但状态最可靠。
             embedding_model = EmbeddingModel()
             embeddings = embedding_model.get_batch_embeddings(self.documents)
             
@@ -415,7 +430,7 @@ class VectorStore:
         import faiss
         self.index = faiss.IndexFlatIP(self.vector_dimension)
 
-        # 删除文件
+        # 删除持久化文件；下一次添加文档时会重新生成。
         if os.path.exists(self.data_file):
             os.remove(self.data_file)
         if os.path.exists(self.index_file):
@@ -446,7 +461,7 @@ class VectorStore:
 
     def rename_store(self, new_name):
         """重命名向量库"""
-        # 生成新的文件名
+        # 生成新的文件名。知识库名称和向量文件名保持一致，便于管理多个知识库。
         new_data_file = f"./knowledge_base_{new_name}_vector_store.pkl"
         new_index_file = f"./knowledge_base_{new_name}_faiss.index"
 

@@ -6,7 +6,11 @@ from datetime import datetime
 from app.models import db
 
 class User(db.Model):
-    """用户表"""
+    """用户表。
+
+    保存登录信息、个人资料、邮箱验证状态、账号锁定状态，
+    以及用户自己的 AI 服务配置。敏感字段如密码和 API Key 不应暴露给前端。
+    """
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -29,7 +33,7 @@ class User(db.Model):
     reset_token = db.Column(db.String(255), nullable=True)
     reset_token_expire = db.Column(db.DateTime, nullable=True)
 
-    # API密钥配置
+    # API 密钥配置：允许每个用户使用自己的云端模型或本地 Ollama 模型。
     deepseek_api_key = db.Column(db.String(255), nullable=True)
     kimi_api_key = db.Column(db.String(255), nullable=True)
     zhipu_api_key = db.Column(db.String(255), nullable=True)
@@ -40,6 +44,7 @@ class User(db.Model):
     records = db.relationship('LearningRecord', backref='user', lazy='dynamic')
 
     def to_dict(self):
+        """返回可安全发送给前端的用户信息，不包含密码、验证码和 API Key。"""
         return {
             'id': self.id,
             'username': self.username,
@@ -67,10 +72,14 @@ class User(db.Model):
         return User.query.filter_by(email=email).first()
 
     def save(self):
+        """提交当前模型对象上的修改。"""
         db.session.commit()
 
 class LearningRecord(db.Model):
-    """学习记录表"""
+    """学习记录表。
+
+    每次用户提问后写入一条记录，用于历史会话、反馈统计和仪表盘展示。
+    """
     __tablename__ = 'learning_records'
     
     id = db.Column(db.Integer, primary_key=True)
@@ -84,13 +93,14 @@ class LearningRecord(db.Model):
     knowledge_base = db.Column(db.String(100))  # 使用的知识库名称
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     
-    # 复合索引
+    # 复合索引：历史记录常按用户、时间、会话查询，提前建索引提升列表页性能。
     __table_args__ = (
         db.Index('idx_user_created', 'user_id', 'created_at'),
         db.Index('idx_session_user', 'session_id', 'user_id'),
     )
     
     def to_dict(self):
+        """转换成前端历史记录列表需要的轻量结构。"""
         return {
             'id': self.id,
             'question': self.question,
@@ -118,7 +128,10 @@ class LearningRecord(db.Model):
 
 
 class UserLog(db.Model):
-    """用户操作日志表"""
+    """用户操作日志表。
+
+    记录登录、登出、找回密码等安全相关行为，便于排查异常操作。
+    """
     __tablename__ = 'user_logs'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -132,6 +145,7 @@ class UserLog(db.Model):
 
     @staticmethod
     def log(user_id, action, ip_address=None, user_agent=None, details=None, status='success'):
+        """写入一条用户行为日志。"""
         log_entry = UserLog(
             user_id=user_id,
             action=action,

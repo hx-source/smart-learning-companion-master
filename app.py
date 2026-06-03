@@ -1,6 +1,7 @@
-"""
-智学伴 - AI个性化学习伴侣系统
-Flask应用主文件
+"""智学伴 - AI 个性化学习伴侣系统 Flask 主入口。
+
+本文件负责创建 Flask 应用、注册蓝图、初始化数据库和 AI/知识库服务，
+并集中声明页面路由、学习记录接口、用户资料接口和知识库管理接口。
 """
 
 from flask import Flask, render_template, jsonify, request
@@ -15,7 +16,8 @@ from app.models import db, User, LearningRecord
 from app.services.ai_service import AIService
 from app.services.auth_service import AuthService
 
-# 内存缓存 - 使用字典存储，在生产环境中应该使用Redis等持久化缓存
+# 内存缓存 - 使用字典存储，在生产环境中应该使用 Redis 等持久化缓存。
+# 当前主要缓存历史会话/记录列表，减少频繁刷新页面时的数据库查询压力。
 from collections import defaultdict
 api_cache = defaultdict(dict)
 
@@ -26,7 +28,10 @@ from app.services.knowledge_service import QAModule
 knowledge_qa = None
 
 def create_app():
-    """创建Flask应用"""
+    """创建并配置 Flask 应用。
+
+    这里采用工厂函数形式，方便集中初始化配置、扩展、蓝图和运行时目录。
+    """
     # 获取应用根目录
     app_root = os.path.dirname(os.path.abspath(__file__))
     # 明确指定模板目录和静态文件目录
@@ -35,15 +40,15 @@ def create_app():
                 static_folder=os.path.join(app_root, 'static'))
     app.config.from_object(Config)
     
-    # 初始化扩展
+    # 初始化扩展：CORS 只开放 /api/*，数据库实例绑定到当前 Flask app。
     CORS(app, resources={r"/api/*": {"origins": "*"}})
     db.init_app(app)
 
-    # 注册蓝图
+    # 注册蓝图：认证相关接口单独放在 app/routes/auth.py，避免主文件继续膨胀。
     from app.routes.auth import bp as auth_bp
     app.register_blueprint(auth_bp)
 
-    # 确保上传目录存在
+    # 确保上传目录存在；头像和知识库文档都是运行时数据，不进入 Git。
     os.makedirs(os.path.join(app_root, app.config['AVATAR_UPLOAD_FOLDER']), exist_ok=True)
     os.makedirs(os.path.join(app_root, app.config['DOCUMENT_UPLOAD_FOLDER']), exist_ok=True)
     
@@ -61,7 +66,7 @@ def create_app():
 # 创建应用实例
 app = create_app()
 
-# 初始化服务
+# 初始化服务：AIService 管理普通问答，QAModule 管理知识库增强问答。
 ai_service = AIService()
 
 # 在应用上下文中初始化服务
@@ -117,6 +122,7 @@ def forgot_password():
     return render_template('forgot-password.html')
 
 # ==================== API接口 ====================
+# 下面的接口按功能分组：反馈/历史记录、模型状态、用户资料、知识库管理、知识库问答。
 
 @app.route('/api/feedback', methods=['POST'])
 def submit_feedback():
@@ -139,7 +145,7 @@ def submit_feedback():
     record.is_helpful = is_helpful
     db.session.commit()
     
-    # 清除相关缓存
+    # 清除相关缓存，确保用户提交反馈后历史列表能立即反映最新状态。
     if f'sessions_{record.user_id}' in api_cache:
         del api_cache[f'sessions_{record.user_id}']
     if f'records_{record.user_id}_1' in api_cache:
