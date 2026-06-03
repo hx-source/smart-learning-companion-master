@@ -12,5 +12,8 @@ PyMuPDF==1.24.0
 python-docx==0.8.11
 numpy==2.2.6
 faiss-cpu==1.13.2
+langchain-community==0.4.2
+langchain-text-splitters==1.1.2
+langchain-ollama==1.1.0
 paddleocr==2.8.1
 paddlepaddle==2.6.2

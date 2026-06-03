@@ -1,16 +1,18 @@
-"""知识库问答服务。
+"""LangChain 知识库问答服务。
 
 这个模块把 RAG（检索增强生成）流程串起来：
 上传文档 -> 提取文本 -> 切分片段 -> 生成嵌入 -> 写入 Faiss ->
 提问时召回片段 -> 可选重排 -> 拼接上下文 -> 调用大模型生成答案。
 """
 
-import requests
 import os
 from dotenv import load_dotenv
 from app.utils.vector_service import EmbeddingModel, VectorStore
 from app.services.reranker_service import RerankerService
 from config import Config
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_ollama import ChatOllama
 
 load_dotenv()
 
@@ -49,6 +51,7 @@ class QAModule:
             self.embedding_model = EmbeddingModel()
             self.vector_store = VectorStore(collection_name=f"knowledge_base_{knowledge_base_name}")
             self.llm_model = Config.OLLAMA_MODEL  # 使用配置中的生成模型
+            self.prompt_template = self._create_prompt_template()
             self.chat_history = []
             self.ollama_url = Config.OLLAMA_BASE_URL
             # 初始化重排服务
@@ -78,11 +81,8 @@ class QAModule:
         if history:
             self.chat_history = history
 
-        # 生成问题的嵌入向量，后续用它和文档片段向量做相似度搜索。
-        query_embedding = self.embedding_model.get_embedding(question)
-
-        # 搜索相关文档
-        search_results = self.vector_store.search(query_embedding, n_results=5)
+        # LangChain FAISS 直接接收查询文本，并通过 EmbeddingModel 完成查询向量化。
+        search_results = self.vector_store.search(question, n_results=5)
 
         # 将召回的文档片段拼接成上下文，交给生成模型参考。
         context = self._build_context(search_results)
@@ -110,11 +110,8 @@ class QAModule:
         Returns:
             dict: 包含 answer 和 sources 的字典
         """
-        # 生成问题的嵌入向量，后续进入“召回 + 重排 + 生成”流程。
-        query_embedding = self.embedding_model.get_embedding(question)
-
         # 搜索相关文档（召回阶段）：先取更多候选，给重排阶段留下选择空间。
-        search_results = self.vector_store.search(query_embedding, n_results=10)  # 先召回更多文档
+        search_results = self.vector_store.search(question, n_results=10)  # 先召回更多文档
 
         # 重排阶段（如果启用）：用生成/评分模型重新判断候选片段和问题的相关性。
         if self.use_reranker and self.reranker:
@@ -184,8 +181,22 @@ class QAModule:
                     context.append(doc)
         return '\n\n'.join(context)
 
+    def _create_prompt_template(self):
+        """创建 LangChain ChatPromptTemplate。"""
+        return ChatPromptTemplate.from_messages([
+            (
+                "system",
+                "你是一个智能知识库助手。请优先根据提供的上下文回答用户问题，"
+                "回答要准确、完整、有条理。如果上下文没有相关信息，请如实说明。",
+            ),
+            (
+                "human",
+                "上下文：\n{context}\n\n用户问题：\n{question}",
+            ),
+        ])
+
     def _build_prompt(self, question, context):
-        """构建提示词
+        """构建提示词文本。
 
         Args:
             question: 用户问题
@@ -194,31 +205,8 @@ class QAModule:
         Returns:
             提示词
         """
-        if context.strip():
-            # 有知识库上下文时，提示词要求模型优先基于文档回答，减少自由发挥。
-            prompt = f"""你是一个智能知识库助手，根据提供的上下文回答用户问题。
-
-上下文：
-{context}
-
-用户问题：
-{question}
-
-请仔细阅读上下文，提取与用户问题相关的所有信息。
-如果上下文包含用户问题的答案，请直接提供答案，不要添加任何额外信息。
-如果上下文没有相关信息，请如实告知。
-
-请确保回答准确、完整，包括所有相关的细节。"""
-        else:
-            # 没有召回到上下文时，降级为普通学习助手回答。
-            prompt = f"""你是一个智能学习助手，请回答用户的问题。
-
-用户问题：
-{question}
-
-请提供准确、有帮助的回答。"""
-
-        return prompt
+        safe_context = context if context.strip() else "未检索到相关知识库上下文。"
+        return self.prompt_template.format(context=safe_context, question=question)
 
     def _call_llm(self, prompt, model_type=None):
         """调用LLM
@@ -241,32 +229,16 @@ class QAModule:
                 result = ai_service.ask_question(prompt, model_type='api')
                 return result['answer']
             else:
-                # 使用Ollama API
-                # 使用/api/chat端点，与ai_service.py保持一致
-                response = requests.post(
-                    f"{self.ollama_url}/api/chat",
-                    json={
-                        "model": self.llm_model,
-                        "messages": [
-                            {"role": "user", "content": prompt}
-                        ],
-                        "stream": False,
-                        "options": {
-                            "temperature": 0.7,
-                            "num_predict": 1000
-                        }
-                    },
-                    timeout=120
+                # 使用 LangChain 的 ChatOllama 调用本地模型。
+                llm = ChatOllama(
+                    base_url=self.ollama_url,
+                    model=self.llm_model,
+                    temperature=0.7,
+                    num_predict=1000,
                 )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    return result['message']['content']
-                else:
-                    return f"Ollama API 调用失败: {response.status_code}"
+                chain = llm | StrOutputParser()
+                return chain.invoke(prompt)
             
-        except requests.exceptions.ConnectionError as e:
-            return f"无法连接到 Ollama，请检查 Ollama 服务是否正常运行"
         except Exception as e:
             return f"API 调用失败: {str(e)}"
 
@@ -300,9 +272,6 @@ class QAModule:
             if not chunks:
                 return True
 
-            # 生成嵌入向量
-            embeddings = self.embedding_model.get_batch_embeddings(chunks)
-
             # 准备元数据：每个文本块都记录来源文件和块序号，便于前端展示和按文件删除。
             metadatas = []
             for i, chunk in enumerate(chunks):
@@ -312,7 +281,7 @@ class QAModule:
                 metadatas.append(chunk_metadata)
 
             # 添加到向量存储
-            self.vector_store.add_embeddings(chunks, embeddings, metadatas)
+            self.vector_store.add_embeddings(chunks, metadatas=metadatas)
 
             return True
         except Exception as e:
