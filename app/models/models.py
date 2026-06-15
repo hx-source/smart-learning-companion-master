@@ -33,13 +33,14 @@ class User(db.Model):
     reset_token = db.Column(db.String(255), nullable=True)
     reset_token_expire = db.Column(db.DateTime, nullable=True)
 
-    # API 密钥配置：允许每个用户使用自己的云端模型或本地 Ollama 模型。
+    # Legacy API key columns kept for old databases; current runtime uses local Ollama only.
     deepseek_api_key = db.Column(db.String(255), nullable=True)
     kimi_api_key = db.Column(db.String(255), nullable=True)
     zhipu_api_key = db.Column(db.String(255), nullable=True)
     use_ollama = db.Column(db.Boolean, default=True)
     ollama_model = db.Column(db.String(50), default='qwen2.5:7b')
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    role = db.Column(db.String(20), default='student', nullable=False, index=True)
 
     records = db.relationship('LearningRecord', backref='user', lazy='dynamic')
 
@@ -56,8 +57,13 @@ class User(db.Model):
             'created_at': self.created_at.strftime('%Y-%m-%d') if self.created_at else None,
             'use_ollama': self.use_ollama,
             'ollama_model': self.ollama_model,
-            'is_admin': self.is_admin
+            'is_admin': self.is_admin,
+            'role': self.role or ('admin' if self.is_admin else 'student')
         }
+
+    def has_role(self, *roles):
+        role = self.role or ('admin' if self.is_admin else 'student')
+        return role in roles or self.is_admin
 
     @staticmethod
     def get_by_id(user_id):
@@ -125,6 +131,54 @@ class LearningRecord(db.Model):
         else:
             return "刚刚"
 
+
+
+class ClassKnowledgeBase(db.Model):
+    """Knowledge base owned by a teacher and attached to a class."""
+    __tablename__ = 'class_knowledge_bases'
+
+    id = db.Column(db.Integer, primary_key=True)
+    class_name = db.Column(db.String(100), nullable=False, index=True)
+    knowledge_base = db.Column(db.String(100), unique=True, nullable=False)
+    teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    description = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    teacher = db.relationship('User', backref=db.backref('class_knowledge_bases', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'class_name': self.class_name,
+            'knowledge_base': self.knowledge_base,
+            'teacher_id': self.teacher_id,
+            'teacher_name': self.teacher.username if self.teacher else None,
+            'description': self.description,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else None
+        }
+
+
+class UserKnowledgeBase(db.Model):
+    """Knowledge base created by a user outside the teacher class publishing flow."""
+    __tablename__ = 'user_knowledge_bases'
+
+    id = db.Column(db.Integer, primary_key=True)
+    knowledge_base = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    owner_role = db.Column(db.String(20), default='student', nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    owner = db.relationship('User', backref=db.backref('user_knowledge_bases', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'knowledge_base': self.knowledge_base,
+            'owner_id': self.owner_id,
+            'owner_name': self.owner.username if self.owner else None,
+            'owner_role': self.owner_role,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else None
+        }
 
 
 class UserLog(db.Model):

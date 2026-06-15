@@ -8,6 +8,8 @@ VectorStore 使用 LangChain Community 的 FAISS 向量库负责持久化和检�
 import math
 import os
 import pickle
+import hashlib
+import re
 import shutil
 import time
 
@@ -19,6 +21,19 @@ from langchain_core.embeddings import Embeddings
 from config import Config
 
 load_dotenv()
+
+
+def _safe_collection_path_name(collection_name):
+    """Return a stable ASCII-only name for vector-store files/directories."""
+    ascii_name = collection_name.encode("ascii", "ignore").decode("ascii")
+    ascii_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", ascii_name).strip("._-")
+
+    if ascii_name == collection_name and ascii_name:
+        return ascii_name[:120]
+
+    digest = hashlib.sha1(collection_name.encode("utf-8")).hexdigest()[:12]
+    prefix = ascii_name[:80].strip("._-") or "collection"
+    return f"{prefix}_{digest}"
 
 
 class EmbeddingModel(Embeddings):
@@ -125,8 +140,10 @@ class VectorStore:
 
     def __init__(self, collection_name="knowledge_base"):
         self.collection_name = collection_name
-        self.store_dir = f"./{collection_name}_langchain_faiss"
-        self.legacy_data_file = f"./{collection_name}_vector_store.pkl"
+        self.safe_collection_name = _safe_collection_path_name(collection_name)
+        self.store_dir = f"./{self.safe_collection_name}_langchain_faiss"
+        self.legacy_data_file = f"./{self.safe_collection_name}_vector_store.pkl"
+        self.legacy_raw_data_file = f"./{collection_name}_vector_store.pkl"
         self.embedding_model = EmbeddingModel()
         self.store = None
         self.documents = []
@@ -152,7 +169,7 @@ class VectorStore:
                 print(f"加载 LangChain FAISS 向量库失败: {str(e)}")
                 self.store = None
                 self._sync_cache_from_store()
-        elif os.path.exists(self.legacy_data_file):
+        elif os.path.exists(self.legacy_data_file) or os.path.exists(self.legacy_raw_data_file):
             self._migrate_legacy_store()
         else:
             self._sync_cache_from_store()
@@ -164,7 +181,8 @@ class VectorStore:
         这里读取旧 pickle 中的原文、元数据和 ID，然后重新生成向量写入新目录。
         """
         try:
-            with open(self.legacy_data_file, "rb") as f:
+            legacy_file = self.legacy_data_file if os.path.exists(self.legacy_data_file) else self.legacy_raw_data_file
+            with open(legacy_file, "rb") as f:
                 data = pickle.load(f)
             documents = data.get("documents", [])
             metadatas = data.get("metadatas", [])
@@ -174,7 +192,7 @@ class VectorStore:
                 self._sync_cache_from_store()
                 return
 
-            print(f"正在迁移旧版向量库到 LangChain FAISS: {self.legacy_data_file}")
+            print(f"正在迁移旧版向量库到 LangChain FAISS: {legacy_file}")
             self.add_embeddings(documents, metadatas=metadatas, ids=ids or None)
             print(f"旧版向量库迁移完成: {len(documents)} 个文档片段")
         except Exception as e:
@@ -185,6 +203,7 @@ class VectorStore:
     def _save_data(self):
         """保存 LangChain FAISS 向量库。"""
         if self.store is not None:
+            os.makedirs(self.store_dir, exist_ok=True)
             self.store.save_local(self.store_dir)
         self._sync_cache_from_store()
 
@@ -336,12 +355,16 @@ class VectorStore:
 
     def rename_store(self, new_name):
         """重命名向量库持久化目录。"""
-        new_store_dir = f"./knowledge_base_{new_name}_langchain_faiss"
+        new_collection_name = f"knowledge_base_{new_name}"
+        new_safe_name = _safe_collection_path_name(new_collection_name)
+        new_store_dir = f"./{new_safe_name}_langchain_faiss"
         if os.path.isdir(self.store_dir):
             if os.path.isdir(new_store_dir):
                 shutil.rmtree(new_store_dir)
             os.rename(self.store_dir, new_store_dir)
             print(f"已重命名向量库目录: {self.store_dir} -> {new_store_dir}")
+        self.collection_name = new_collection_name
+        self.safe_collection_name = new_safe_name
         self.store_dir = new_store_dir
         self._load_data()
 

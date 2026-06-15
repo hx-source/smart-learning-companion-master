@@ -5,17 +5,21 @@ PDF 会优先提取内嵌文本；如果页面像扫描件或只提取到页码�
 """
 
 import os
-from docx import Document
-import fitz  # PyMuPDF
-from paddleocr import PaddleOCR
+from app.utils.numpy_compat import patch_numpy_sctypes
 
 
 class FileProcessor:
     """文件内容提取器。"""
 
     def __init__(self):
-        # PaddleOCR 初始化较重，因此在处理器实例创建时统一准备好。
-        self.ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
+        self.ocr = None
+
+    def _get_ocr(self):
+        if self.ocr is None:
+            patch_numpy_sctypes()
+            from paddleocr import PaddleOCR
+            self.ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
+        return self.ocr
 
     def process_file(self, file_path):
         """根据文件扩展名调用对应的处理方法。"""
@@ -37,6 +41,8 @@ class FileProcessor:
         """
         text = []
         try:
+            import fitz  # PyMuPDF
+
             doc = fitz.open(file_path)
             num_pages = doc.page_count
             for page_num in range(num_pages):
@@ -86,12 +92,14 @@ class FileProcessor:
             best_result = []
             
             for scale in scales:
+                import fitz  # PyMuPDF
+
                 mat = fitz.Matrix(scale, scale)
                 pix = page.get_pixmap(matrix=mat, alpha=False)
                 img_bytes = pix.tobytes("png")
                 
                 # OCR 输入使用渲染后的 PNG 字节，避免依赖临时图片文件。
-                result = self.ocr.ocr(img_bytes, cls=True)
+                result = self._get_ocr().ocr(img_bytes, cls=True)
                 
                 if result and result[0]:
                     ocr_lines = []
@@ -106,11 +114,13 @@ class FileProcessor:
             # 如果彩色图识别不到内容，尝试灰度渲染，部分扫描件会更清晰。
             if not best_result:
                 # 尝试灰度处理
+                import fitz  # PyMuPDF
+
                 mat = fitz.Matrix(3, 3)
                 pix = page.get_pixmap(matrix=mat, alpha=False, colorspace=fitz.csGRAY)
                 img_bytes = pix.tobytes("png")
                 
-                result = self.ocr.ocr(img_bytes, cls=True)
+                result = self._get_ocr().ocr(img_bytes, cls=True)
                 
                 if result and result[0]:
                     for line in result[0]:
@@ -136,6 +146,11 @@ class FileProcessor:
         """处理 DOCX 文件，提取段落和表格文本。"""
         text = []
         try:
+            try:
+                from docx import Document
+            except ImportError as exc:
+                raise RuntimeError('缺少 python-docx 依赖，无法解析 Word 文档') from exc
+
             doc = Document(file_path)
             # 处理段落：Word 正文的大多数内容都在 paragraphs 中。
             for paragraph in doc.paragraphs:

@@ -5,121 +5,220 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>知识库 - 智学伴</title>
     <link rel="stylesheet" href="/static/css/style.css">
-    <!-- 预加载关键资源 -->
-    <link rel="preload" href="/static/js/shared.js" as="script">
-    <link rel="preload" href="/static/css/style.css" as="style">
+    <style>
+        .kb-shell {
+            display: grid;
+            grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+            gap: 18px;
+            align-items: start;
+        }
+        .kb-sidebar, .kb-detail {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+        }
+        .kb-sidebar {
+            padding: 16px;
+            position: sticky;
+            top: 84px;
+        }
+        .kb-sidebar-head, .kb-detail-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+        .kb-sidebar-head h2, .kb-detail-head h2 {
+            font-size: 18px;
+            margin: 0;
+        }
+        .kb-create-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 14px;
+        }
+        .kb-list {
+            display: grid;
+            gap: 8px;
+        }
+        .kb-item {
+            width: 100%;
+            border: 1px solid #e5e7eb;
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 10px 12px;
+            text-align: left;
+            cursor: pointer;
+            display: grid;
+            gap: 6px;
+        }
+        .kb-item.active {
+            border-color: #4a6cf7;
+            background: #eef2ff;
+        }
+        .kb-item-title {
+            font-weight: 700;
+            color: #111827;
+            word-break: break-word;
+        }
+        .kb-item-meta {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .kb-tag {
+            padding: 2px 7px;
+            border-radius: 999px;
+            background: #e5e7eb;
+            color: #374151;
+        }
+        .kb-tag.class { background: #e0f2fe; color: #0369a1; }
+        .kb-tag.personal { background: #dcfce7; color: #166534; }
+        .kb-tag.readonly { background: #fee2e2; color: #991b1b; }
+        .kb-detail {
+            min-height: 520px;
+            padding: 20px;
+        }
+        .kb-detail-sub {
+            color: #6b7280;
+            margin: -6px 0 0;
+            font-size: 13px;
+        }
+        .kb-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .kb-empty-panel {
+            display: grid;
+            place-items: center;
+            min-height: 420px;
+            text-align: center;
+            color: #4b5563;
+        }
+        .kb-empty-panel h2 {
+            color: #111827;
+            margin-bottom: 8px;
+        }
+        .kb-upload-box {
+            border: 1px dashed #c7d2fe;
+            border-radius: 12px;
+            background: #f8fafc;
+            padding: 18px;
+            margin: 18px 0;
+        }
+        .kb-upload-title {
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .kb-upload-area {
+            border: 1px dashed #9ca3af;
+            border-radius: 10px;
+            padding: 28px 16px;
+            text-align: center;
+            background: #fff;
+            cursor: pointer;
+        }
+        .kb-upload-area.dragover {
+            border-color: #4a6cf7;
+            background: #eef2ff;
+        }
+        .kb-file-list {
+            display: grid;
+            gap: 10px;
+        }
+        .kb-file-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px;
+            background: #fff;
+        }
+        .kb-file-name {
+            font-weight: 650;
+            word-break: break-word;
+        }
+        .kb-file-path {
+            color: #6b7280;
+            font-size: 12px;
+            word-break: break-all;
+            margin-top: 4px;
+        }
+        .kb-status {
+            min-height: 24px;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .kb-status.success { color: #15803d; }
+        .kb-status.error { color: #b91c1c; }
+        .kb-status.info { color: #1d4ed8; }
+        .kb-readonly-note {
+            padding: 12px;
+            border-radius: 8px;
+            background: #fff7ed;
+            color: #9a3412;
+            margin: 18px 0;
+        }
+        @media (max-width: 900px) {
+            .kb-shell { grid-template-columns: 1fr; }
+            .kb-sidebar { position: static; }
+            .kb-detail-head { align-items: flex-start; flex-direction: column; }
+            .kb-actions { justify-content: flex-start; }
+        }
+    </style>
 </head>
 <body>
-    <!-- 导航栏 -->
     {% include 'components/navbar.html' %}
 
-    <!-- 主内容 -->
     <div class="main-wrapper">
         <main class="knowledge-page">
             <h1 class="page-title">知识库管理</h1>
-            
-            <!-- 知识库选择器 -->
-            <div class="knowledge-base-selector">
-                <label for="knowledgeBaseSelect">选择知识库：</label>
-                <select id="knowledgeBaseSelect" onchange="switchKnowledgeBase()">
-                    <option value="default">默认知识库</option>
-                </select>
-                <button class="btn-primary small" onclick="createKnowledgeBase()">创建知识库</button>
-            </div>
 
-            <!-- 统计信息卡片 -->
-            <div class="stats-cards">
-                <div class="stat-card">
-                    <div class="stat-icon">📄</div>
-                    <div class="stat-info">
-                        <div class="stat-value" id="totalDocuments">-</div>
-                        <div class="stat-label">文档数量</div>
+            <div class="kb-shell">
+                <aside class="kb-sidebar">
+                    <div class="kb-sidebar-head">
+                        <h2>知识库</h2>
                     </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon">🧩</div>
-                    <div class="stat-info">
-                        <div class="stat-value" id="totalVectors">-</div>
-                        <div class="stat-label">向量数量</div>
+                    <div class="kb-create-actions">
+                        <button class="btn-primary small" id="createPersonalBtn" type="button">创建个人知识库</button>
+                        {% if request.current_user and request.current_user.has_role('teacher', 'admin') %}
+                        <button class="btn-secondary small" id="createClassBtn" type="button">发布班级知识库</button>
+                        {% endif %}
                     </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon">📊</div>
-                    <div class="stat-info">
-                        <div class="stat-value" id="vectorDimension">-</div>
-                        <div class="stat-label">向量维度</div>
+                    <div class="kb-list" id="knowledgeBaseList">
+                        <div class="loading">加载中...</div>
                     </div>
-                </div>
-            </div>
+                </aside>
 
-            <!-- 文件上传区域 -->
-            <div class="upload-section">
-                <div class="section-header">
-                    <h3>📤 上传文档</h3>
-                    <p class="section-desc">支持 PDF、TXT、DOCX 格式，文件将自动解析并添加到知识库</p>
-                </div>
-                <div class="upload-area" id="uploadArea">
-                    <div class="upload-icon">📁</div>
-                    <div class="upload-text">
-                        <p>拖拽文件到此处，或 <span class="upload-link">点击上传</span></p>
-                        <p class="upload-hint">支持 PDF、TXT、DOCX 格式，单个文件最大 100MB</p>
+                <section class="kb-detail" id="knowledgeBaseDetail">
+                    <div class="kb-empty-panel">
+                        <div>
+                            <h2>选择或创建一个知识库</h2>
+                            <p>创建后即可上传文档，系统会自动解析并用于知识库问答。</p>
+                            <button class="btn-primary" id="emptyCreatePersonalBtn" type="button">创建个人知识库</button>
+                        </div>
                     </div>
-                    <input type="file" id="fileInput" accept=".pdf,.txt,.docx" multiple style="display: none;">
-                </div>
-                <div class="upload-progress" id="uploadProgress" style="display: none;">
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progressFill"></div>
-                    </div>
-                    <span class="progress-text" id="progressText">0%</span>
-                </div>
-                <div class="upload-status" id="uploadStatus"></div>
-            </div>
-
-
-
-            <!-- 文件分类管理 -->
-            <div class="sources-section">
-                <div class="section-header">
-                    <h3>📁 文件来源管理</h3>
-                    <p class="section-desc">按文件来源分类管理向量数据</p>
-                </div>
-                <div class="sources-filter">
-                    <input type="text" id="sourceFilter" placeholder="搜索文件名..." oninput="filterSources()">
-                </div>
-                <div class="sources-list" id="sourcesList">
-                    <div class="loading">
-                        <div class="loading-dots"><span></span><span></span><span></span></div>
-                        <div>加载中...</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 向量列表 -->
-            <div class="vectors-section">
-                <div class="section-header">
-                    <h3>🧩 向量列表</h3>
-                    <p class="section-desc">显示知识库中的所有向量信息</p>
-                </div>
-                <div class="vectors-list" id="vectorsList">
-                    <div class="loading">
-                        <div class="loading-dots"><span></span><span></span><span></span></div>
-                        <div>加载中...</div>
-                    </div>
-                </div>
-                <div class="vectors-pagination" id="vectorsPagination">
-                    <!-- 动态生成 -->
-                </div>
+                </section>
             </div>
         </main>
     </div>
 
     <script>
-        // 全局变量
-        let currentPage = 1;
-        const pageSize = 10;
-        let currentKnowledgeBase = 'default';
+        const CURRENT_USER_ID = {{ request.current_user.id if request.current_user else 'null' }};
+        const CURRENT_USER_ROLE = "{{ request.current_user.role if request.current_user else 'student' }}";
+        let knowledgeBases = [];
+        let selectedKnowledgeBase = null;
+        let selectedSources = [];
 
-        // 获取cookie
         function getCookie(name) {
             const value = `; ${document.cookie}`;
             const parts = value.split(`; ${name}=`);
@@ -127,647 +226,460 @@
             return null;
         }
 
-        // 页面加载完成后执行
-        document.addEventListener('DOMContentLoaded', function() {
-            loadKnowledgeBases();
-            loadStats();
-            loadSources();
-            initUploadArea();
-            
-            // 实现向量列表的懒加载
-            initLazyLoading();
-        });
-        
-        // 加载所有知识库列表
-        async function loadKnowledgeBases() {
+        function authHeaders(extra = {}) {
+            const token = localStorage.getItem('token') || getCookie('token');
+            return { ...extra, 'Authorization': `Bearer ${token}` };
+        }
+
+        function normalizeName(value) {
+            return (value || '').trim();
+        }
+
+        function displayName(kb) {
+            return kb.display_name || kb.class_name || kb.name;
+        }
+
+        function isManageable(kb) {
+            return Boolean(kb && kb.can_manage);
+        }
+
+        function buildKnowledgeBaseItems(data) {
+            if (Array.isArray(data.items)) {
+                return data.items.map(item => ({
+                    ...item,
+                    class_name: item.display_name || item.class_name || item.name,
+                    owner_name: item.owner_name || item.teacher_name || (item.type === 'personal' ? '我' : '用户')
+                }));
+            }
+
+            const classMap = new Map((data.class_knowledge_bases || []).map(item => [item.knowledge_base, item]));
+            const personalMap = new Map((data.user_knowledge_bases || []).map(item => [item.knowledge_base, item]));
+
+            return (data.data || []).map(name => {
+                if (classMap.has(name)) {
+                    const item = classMap.get(name);
+                    return {
+                        name,
+                        type: 'class',
+                        class_name: item.class_name,
+                        description: item.description || '',
+                        teacher_id: item.teacher_id,
+                        owner_name: item.teacher_name || '教师',
+                        can_manage: CURRENT_USER_ROLE === 'admin' || item.teacher_id === CURRENT_USER_ID
+                    };
+                }
+                if (personalMap.has(name)) {
+                    const item = personalMap.get(name);
+                    return {
+                        name,
+                        type: 'personal',
+                        owner_id: item.owner_id,
+                        owner_name: item.owner_name || '用户',
+                        can_manage: CURRENT_USER_ROLE === 'admin' || item.owner_id === CURRENT_USER_ID
+                    };
+                }
+                return {
+                    name,
+                    type: 'personal',
+                    owner_id: CURRENT_USER_ID,
+                    owner_name: '我',
+                    can_manage: true
+                };
+            });
+        }
+
+        async function loadKnowledgeBases(selectName = null) {
+            const list = document.getElementById('knowledgeBaseList');
+            list.innerHTML = '<div class="loading">加载中...</div>';
             try {
-                const token = localStorage.getItem('token') || getCookie('token');
                 const response = await fetch('/api/knowledge-base/list', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
+                    headers: authHeaders()
                 });
                 const data = await response.json();
-                
-                if (data.code === 200) {
-                    const select = document.getElementById('knowledgeBaseSelect');
-                    if (select) {
-                        // 清空现有选项
-                        select.innerHTML = '';
-                        
-                        // 添加所有知识库选项
-                        data.data.forEach(kb => {
-                            const option = document.createElement('option');
-                            option.value = kb;
-                            option.textContent = kb;
-                            if (kb === currentKnowledgeBase) {
-                                option.selected = true;
-                            }
-                            select.appendChild(option);
-                        });
-                    }
-                }
-            } catch (error) {
-                console.error('加载知识库列表失败:', error);
-            }
-        }
-        
-        // 切换知识库
-        function switchKnowledgeBase() {
-            const select = document.getElementById('knowledgeBaseSelect');
-            if (select) {
-                currentKnowledgeBase = select.value;
-                // 重新加载数据
-                loadStats();
-                loadSources();
-                loadVectors();
-            }
-        }
-        
-        // 创建知识库
-        function createKnowledgeBase() {
-            const name = prompt('请输入知识库名称:');
-            if (name && name.trim()) {
-                // 验证知识库名称
-                if (name.includes('/') || name.includes('\\') || name.includes('.')) {
-                    alert('知识库名称不能包含斜杠或点号');
-                    return;
-                }
-                
-                // 初始化新知识库
-                try {
-                    const token = localStorage.getItem('token') || getCookie('token');
-                    // 发送请求到服务器，创建新知识库
-                    // 这里我们通过上传一个空文件来触发知识库的创建
-                    const formData = new FormData();
-                    // 创建一个空文件
-                    const emptyFile = new Blob([''], { type: 'text/plain' });
-                    formData.append('file', emptyFile, 'empty.txt');
-                    formData.append('knowledge_base', name);
-                    
-                    fetch('/api/knowledge-base/upload', {
-                        method: 'POST',
-                        body: formData,
-                        headers: {
-                            'Authorization': `Bearer ${token}`
-                        }
-                    }).then(response => response.json()).then(data => {
-                        if (data.code === 200) {
-                            // 重新加载知识库列表
-                            loadKnowledgeBases();
-                            // 选择新创建的知识库
-                            setTimeout(() => {
-                                const select = document.getElementById('knowledgeBaseSelect');
-                                if (select) {
-                                    select.value = name;
-                                    switchKnowledgeBase();
-                                }
-                            }, 100);
-                        } else {
-                            alert('创建知识库失败: ' + data.msg);
-                        }
-                    });
-                } catch (error) {
-                    console.error('创建知识库失败:', error);
-                    alert('创建知识库失败: ' + error.message);
-                }
-            }
-        }
-        
-        // 初始化懒加载
-        function initLazyLoading() {
-            const vectorsSection = document.querySelector('.vectors-section');
-            if (!vectorsSection) return;
-            
-            const observer = new IntersectionObserver((entries) => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting) {
-                        // 当向量列表区域进入视口时，加载数据
-                        loadVectors();
-                        // 只加载一次
-                        observer.disconnect();
-                    }
-                });
-            }, {
-                threshold: 0.1
-            });
-            
-            observer.observe(vectorsSection);
-        }
-        
-        // 加载文件来源列表
-        async function loadSources() {
-            const sourcesList = document.getElementById('sourcesList');
-            if (!sourcesList) return;
-            
-            try {
-                sourcesList.innerHTML = `
-                    <div class="loading">
-                        <div class="loading-dots"><span></span><span></span><span></span></div>
-                        <div>加载中...</div>
-                    </div>
-                `;
-                
-                const token = localStorage.getItem('token') || getCookie('token');
-                const response = await fetch(`/api/knowledge-base/sources?knowledge_base=${encodeURIComponent(currentKnowledgeBase)}`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                const data = await response.json();
-                
-                if (data.code === 200) {
-                    displaySources(data.data);
+                if (data.code !== 200) throw new Error(data.msg || data.error || '加载失败');
+
+                knowledgeBases = buildKnowledgeBaseItems(data);
+                renderKnowledgeBaseList();
+
+                const targetName = selectName || selectedKnowledgeBase?.name || knowledgeBases[0]?.name;
+                if (targetName) {
+                    selectKnowledgeBase(targetName);
                 } else {
-                    sourcesList.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-icon">❌</div>
-                            <div>加载文件来源失败: ${data.msg}</div>
-                        </div>
-                    `;
+                    renderEmptyState();
                 }
             } catch (error) {
-                sourcesList.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-icon">❌</div>
-                        <div>加载文件来源出错: ${error.message}</div>
-                    </div>
-                `;
-            }
-        }
-        
-        // 显示文件来源列表
-        function displaySources(sources) {
-            const sourcesList = document.getElementById('sourcesList');
-            if (!sourcesList) return;
-            
-            if (!sources || sources.length === 0) {
-                sourcesList.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-icon">📁</div>
-                        <div>暂无文件来源</div>
-                    </div>
-                `;
-                return;
-            }
-            
-            // 清空容器
-            sourcesList.innerHTML = '';
-            
-            // 为每个来源创建元素
-            sources.forEach(source => {
-                const sourceItem = document.createElement('div');
-                sourceItem.className = 'source-item';
-                
-                sourceItem.innerHTML = `
-                    <div class="source-info">
-                        <div class="source-name">${source.file_name}</div>
-                        <div class="source-stats">
-                            <span class="vector-count">${source.vector_count} 个向量</span>
-                            <span class="source-path">${source.file_path}</span>
-                        </div>
-                    </div>
-                    <div class="source-actions">
-                        <button class="btn-secondary small">查看向量</button>
-                        <button class="btn-danger small">删除</button>
-                    </div>
-                `;
-                
-                // 添加事件监听器
-                const viewBtn = sourceItem.querySelector('.btn-secondary');
-                const deleteBtn = sourceItem.querySelector('.btn-danger');
-                
-                viewBtn.addEventListener('click', () => viewSourceVectors(source.file_path));
-                deleteBtn.addEventListener('click', () => deleteSource(source.file_path));
-                
-                sourcesList.appendChild(sourceItem);
-            });
-        }
-        
-        // 按文件名筛选文件来源
-        function filterSources() {
-            const filter = document.getElementById('sourceFilter').value.toLowerCase();
-            const sourceItems = document.querySelectorAll('.source-item');
-            
-            sourceItems.forEach(item => {
-                const fileName = item.querySelector('.source-name').textContent.toLowerCase();
-                const filePath = item.querySelector('.source-path').textContent.toLowerCase();
-                
-                if (fileName.includes(filter) || filePath.includes(filter)) {
-                    item.style.display = 'flex';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
-        }
-        
-        // 查看文件来源的向量
-        function viewSourceVectors(filePath) {
-            // 编码文件路径
-            const encodedPath = encodeURIComponent(filePath);
-            // 加载该文件的向量数据
-            loadVectors(1, 10, encodedPath);
-        }
-        
-        // 删除文件来源
-        function deleteSource(filePath) {
-            if (!confirm(`确定要删除文件 "${filePath}" 的所有向量数据吗？此操作不可恢复！`)) {
-                return;
-            }
-            
-            // 编码文件路径
-            const encodedPath = encodeURIComponent(filePath);
-            
-            try {
-                const token = localStorage.getItem('token') || getCookie('token');
-                fetch(`/api/knowledge-base/sources/${encodedPath}?knowledge_base=${encodeURIComponent(currentKnowledgeBase)}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.code === 200) {
-                        showStatus(`成功删除 ${data.data.deleted_count} 个向量`, 'success');
-                        // 重新加载文件来源列表和统计信息
-                        loadSources();
-                        loadStats();
-                        // 重新加载向量列表（清空当前筛选）
-                        loadVectors();
-                    } else {
-                        showStatus(`删除失败: ${data.msg}`, 'error');
-                    }
-                })
-                .catch(error => {
-                    showStatus(`删除出错: ${error.message}`, 'error');
-                });
-            } catch (error) {
-                showStatus(`删除出错: ${error.message}`, 'error');
-            }
-        }
-        
-        // 保存当前的source参数
-        let currentSource = null;
-        
-        // 修改loadVectors函数，支持按来源筛选
-        async function loadVectors(page = 1, pageSize = 10, source = null) {
-            const vectorsList = document.getElementById('vectorsList');
-            const vectorsPagination = document.getElementById('vectorsPagination');
-            
-            // 保存当前的source
-            currentSource = source;
-            
-            try {
-                // 显示加载状态
-                vectorsList.innerHTML = `
-                    <div class="loading">
-                        <div class="loading-dots"><span></span><span></span><span></span></div>
-                        <div>加载中...</div>
-                    </div>
-                `;
-                
-                const token = localStorage.getItem('token') || getCookie('token');
-                let url = `/api/knowledge-base/vectors?page=${page}&page_size=${pageSize}&knowledge_base=${encodeURIComponent(currentKnowledgeBase)}`;
-                if (source) {
-                    url += `&source=${source}`;
-                }
-                
-                const response = await fetch(url, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                const data = await response.json();
-                
-                if (data.code === 200) {
-                    displayVectors(data.data, source);
-                    displayPagination(data.data, page, pageSize, source);
-                } else {
-                    vectorsList.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-icon">❌</div>
-                            <div>加载向量失败: ${data.msg}</div>
-                        </div>
-                    `;
-                    vectorsPagination.innerHTML = '';
-                }
-            } catch (error) {
-                vectorsList.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-icon">❌</div>
-                        <div>加载向量出错: ${error.message}</div>
-                    </div>
-                `;
-                vectorsPagination.innerHTML = '';
-            }
-        }
-        
-        // 查看全部向量
-        function viewAllVectors() {
-            loadVectors(1, 10, null);
-        }
-        
-        // 修改displayPagination函数，支持传递source参数
-        function displayPagination(data, currentPage, pageSize, source = null) {
-            const vectorsPagination = document.getElementById('vectorsPagination');
-            const totalPages = Math.ceil(data.total / pageSize);
-            
-            if (totalPages <= 1) {
-                vectorsPagination.innerHTML = '';
-                return;
-            }
-            
-            let paginationHTML = `
-                <div class="pagination">
-                    <button class="pagination-btn ${currentPage === 1 ? 'disabled' : ''}" onclick="loadVectors(${currentPage - 1}, ${pageSize}, ${source ? `'${source}'` : 'null'})">&laquo;</button>
-            `;
-            
-            // 显示页码
-            for (let i = 1; i <= totalPages; i++) {
-                if (i <= 3 || i >= totalPages - 2 || (i >= currentPage - 1 && i <= currentPage + 1)) {
-                    paginationHTML += `
-                        <button class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="loadVectors(${i}, ${pageSize}, ${source ? `'${source}'` : 'null'})"><span>${i}</span></button>
-                    `;
-                } else if (i === 4 || i === totalPages - 3) {
-                    paginationHTML += `<span class="pagination-ellipsis">...</span>`;
-                }
-            }
-            
-            paginationHTML += `
-                    <button class="pagination-btn ${currentPage === totalPages ? 'disabled' : ''}" onclick="loadVectors(${currentPage + 1}, ${pageSize}, ${source ? `'${source}'` : 'null'})">&raquo;</button>
-                </div>
-            `;
-            
-            vectorsPagination.innerHTML = paginationHTML;
-        }
-
-        // 加载统计信息
-        async function loadStats() {
-            try {
-                const token = localStorage.getItem('token') || getCookie('token');
-                const response = await fetch(`/api/knowledge-base/stats?knowledge_base=${encodeURIComponent(currentKnowledgeBase)}`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                const data = await response.json();
-
-                if (data.code === 200) {
-                    document.getElementById('totalDocuments').textContent = data.data.total_documents;
-                    document.getElementById('totalVectors').textContent = data.data.total_vectors;
-                    document.getElementById('vectorDimension').textContent = data.data.vector_dimension;
-                }
-            } catch (error) {
-                console.error('加载统计信息失败:', error);
+                list.innerHTML = `<div class="empty-state">加载失败：${error.message}</div>`;
+                renderEmptyState();
             }
         }
 
-        // 刷新统计
-        function refreshStats() {
-            loadStats();
-            showStatus('统计信息已刷新', 'success');
-        }
-
-        // 初始化上传区域
-        function initUploadArea() {
-            const uploadArea = document.getElementById('uploadArea');
-            const fileInput = document.getElementById('fileInput');
-
-            // 防止重复初始化
-            if (uploadArea.dataset.initialized) return;
-            uploadArea.dataset.initialized = 'true';
-
-            // 点击上传
-            uploadArea.addEventListener('click', (e) => {
-                // 阻止事件冒泡，防止多次触发
-                e.stopPropagation();
-                fileInput.click();
-            });
-
-            // 文件选择
-            fileInput.addEventListener('change', (e) => {
-                // 阻止事件冒泡，防止多次触发
-                e.stopPropagation();
-                if (e.target.files.length > 0) {
-                    handleFiles(e.target.files);
-                }
-            });
-
-            // 拖拽上传
-            uploadArea.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                uploadArea.classList.add('dragover');
-            });
-
-            uploadArea.addEventListener('dragleave', () => {
-                uploadArea.classList.remove('dragover');
-            });
-
-            uploadArea.addEventListener('drop', (e) => {
-                e.preventDefault();
-                uploadArea.classList.remove('dragover');
-                if (e.dataTransfer.files.length > 0) {
-                    handleFiles(e.dataTransfer.files);
-                }
-            });
-        }
-
-        // 处理文件上传
-        async function handleFiles(files) {
-            const uploadProgress = document.getElementById('uploadProgress');
-            const progressFill = document.getElementById('progressFill');
-            const progressText = document.getElementById('progressText');
-            const fileInput = document.getElementById('fileInput');
-
-            // 检查是否有文件
-            if (files.length === 0) return;
-
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-
-                // 检查文件类型
-                const allowedExtensions = ['.pdf', '.txt', '.docx'];
-                const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-
-                if (!allowedExtensions.includes(fileExt)) {
-                    showStatus(`不支持的文件格式: ${file.name}`, 'error');
-                    continue;
-                }
-
-                // 显示进度条
-                uploadProgress.style.display = 'flex';
-                updateProgress(0);
-
-                const formData = new FormData();
-                formData.append('file', file);
-                formData.append('knowledge_base', currentKnowledgeBase);
-
-                try {
-                    updateProgress(30);
-                    const token = localStorage.getItem('token') || getCookie('token');
-                    const response = await fetch('/api/knowledge-base/upload', {
-                        method: 'POST',
-                        body: formData,
-                        headers: {
-                            'Authorization': `Bearer ${token}`
-                        }
-                    });
-                    updateProgress(70);
-
-                    const data = await response.json();
-                    updateProgress(100);
-
-                    if (data.code === 200) {
-                        showStatus(`✅ ${file.name} 上传成功`, 'success');
-                        loadStats(); // 刷新统计
-                        loadSources(); // 刷新文件来源列表
-                        loadVectors(); // 刷新向量列表
-                    } else {
-                        showStatus(`❌ ${file.name} 上传失败: ${data.msg}`, 'error');
-                    }
-                } catch (error) {
-                    showStatus(`❌ ${file.name} 上传出错: ${error.message}`, 'error');
-                } finally {
-                    // 延迟隐藏进度条
-                    setTimeout(() => {
-                        uploadProgress.style.display = 'none';
-                    }, 1000);
-                }
-            }
-            
-            // 重置文件输入框，允许再次选择同一文件
-            fileInput.value = '';
-        }
-
-        // 更新进度条
-        function updateProgress(percent) {
-            document.getElementById('progressFill').style.width = percent + '%';
-            document.getElementById('progressText').textContent = percent + '%';
-        }
-
-        // 显示向量列表
-        function displayVectors(data, source) {
-            const vectorsList = document.getElementById('vectorsList');
-
-            if (!data || !data.items || data.items.length === 0) {
-                vectorsList.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-icon">🧩</div>
-                        <div>暂无向量数据</div>
-                    </div>
-                `;
+        function renderKnowledgeBaseList() {
+            const list = document.getElementById('knowledgeBaseList');
+            if (!knowledgeBases.length) {
+                list.innerHTML = '<div class="empty-state">暂无知识库</div>';
                 return;
             }
 
-            // 构建向量列表
-            let vectorsHTML = '';
-            
-            // 如果有source参数，添加"查看全部向量"按钮
-            if (source) {
-                vectorsHTML = `
-                    <div class="view-all-vectors">
-                        <button class="btn-secondary small" onclick="viewAllVectors()">查看全部向量</button>
-                    </div>
-                `;
-            }
-            
-            vectorsHTML += data.items.map((vector, index) => {
-                const content = vector.content || '';
-                const truncatedContent = content.length > 100 ? content.substring(0, 100) + '...' : content;
+            list.innerHTML = knowledgeBases.map(kb => {
+                const active = selectedKnowledgeBase?.name === kb.name ? ' active' : '';
+                const typeText = kb.type === 'class' ? '班级' : (kb.type === 'system' ? '系统' : '个人');
+                const manageText = isManageable(kb) ? '可管理' : '只读';
                 return `
-                    <div class="vector-item">
-                        <div class="vector-header">
-                            <span class="vector-index">#${(data.page - 1) * data.page_size + index + 1}</span>
-                            <span class="vector-source">${vector.source || '未知来源'}</span>
-                        </div>
-                        <div class="vector-content">
-                            ${truncatedContent}
-                        </div>
-                        <div class="vector-meta">
-                            <span class="vector-chunk">片段: ${vector.chunk_index || 0}</span>
-                            <button class="btn-small" data-vector='${JSON.stringify(vector).replace(/'/g, "&#39;")}'><</button>
-                        </div>
-                    </div>
+                    <button class="kb-item${active}" onclick="selectKnowledgeBase('${kb.name.replace(/'/g, "\\'")}')">
+                        <span class="kb-item-title">${displayName(kb)}</span>
+                        <span class="kb-item-meta">
+                            <span class="kb-tag ${kb.type}">${typeText}</span>
+                            <span class="kb-tag ${isManageable(kb) ? '' : 'readonly'}">${manageText}</span>
+                        </span>
+                    </button>
                 `;
             }).join('');
-            
-            vectorsList.innerHTML = vectorsHTML;
-            
-            // 添加事件监听器
-            document.querySelectorAll('.vector-item .btn-small').forEach(button => {
-                button.addEventListener('click', function() {
-                    const vector = JSON.parse(this.getAttribute('data-vector'));
-                    showVectorDetails(vector);
-                });
+        }
+
+        async function selectKnowledgeBase(name) {
+            selectedKnowledgeBase = knowledgeBases.find(kb => kb.name === name) || null;
+            renderKnowledgeBaseList();
+            renderDetailLoading();
+            if (!selectedKnowledgeBase) {
+                renderEmptyState();
+                return;
+            }
+            await loadSources();
+            renderDetail();
+        }
+
+        function renderEmptyState() {
+            document.getElementById('knowledgeBaseDetail').innerHTML = `
+                <div class="kb-empty-panel">
+                    <div>
+                        <h2>创建你的第一个个人知识库</h2>
+                        <p>点击创建后，页面会进入上传文档状态。</p>
+                        <button class="btn-primary" type="button" onclick="showPersonalCreateForm()">创建个人知识库</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderCreateForm(type) {
+            const isClass = type === 'class';
+            document.getElementById('knowledgeBaseDetail').innerHTML = `
+                <div class="kb-detail-head">
+                    <div>
+                        <h2>${isClass ? '发布班级知识库' : '创建个人知识库'}</h2>
+                        <p class="kb-detail-sub">${isClass ? '填写班级信息，完成后即可上传班级资料。' : '填写知识库名称，完成后即可上传文档。'}</p>
+                    </div>
+                </div>
+                <form class="profile-form" id="createKnowledgeForm" style="max-width: 560px;">
+                    <div class="form-group">
+                        <label>${isClass ? '班级名称' : '知识库名称'}</label>
+                        <input type="text" id="createKnowledgeName" required placeholder="${isClass ? '例如：高一数学1班' : '例如：我的数学资料'}">
+                    </div>
+                    ${isClass ? `
+                    <div class="form-group">
+                        <label>班级知识库说明（可选）</label>
+                        <input type="text" id="createKnowledgeDescription" placeholder="例如：本学期函数与几何资料">
+                    </div>
+                    ` : ''}
+                    <div class="form-actions">
+                        <button type="button" class="btn-secondary" onclick="renderEmptyState()">取消</button>
+                        <button type="submit" class="btn-primary">${isClass ? '完成发布' : '完成创建'}</button>
+                    </div>
+                </form>
+                <div class="kb-status" id="kbStatus"></div>
+            `;
+
+            document.getElementById('createKnowledgeName')?.focus();
+            document.getElementById('createKnowledgeForm')?.addEventListener('submit', event => {
+                event.preventDefault();
+                if (isClass) {
+                    submitClassKnowledgeBase();
+                } else {
+                    submitPersonalKnowledgeBase();
+                }
             });
         }
 
-        // 显示向量详情
-        function showVectorDetails(vector) {
-            const content = vector.content || '';
-            const metadata = vector.metadata || {};
-            
-            let detailsHTML = `
-                <div class="vector-details">
-                    <h4>向量详情</h4>
-                    <div class="detail-item">
-                        <label>来源:</label>
-                        <span>${vector.source || '未知来源'}</span>
-                    </div>
-                    <div class="detail-item">
-                        <label>片段索引:</label>
-                        <span>${vector.chunk_index || 0}</span>
-                    </div>
-                    <div class="detail-item">
-                        <label>内容:</label>
-                        <div class="detail-content">${content}</div>
-                    </div>
-                    <div class="detail-item">
-                        <label>元数据:</label>
-                        <div class="detail-content">${JSON.stringify(metadata, null, 2)}</div>
-                    </div>
-                </div>
-            `;
-
-            // 创建模态框
-            const modal = document.createElement('div');
-            modal.className = 'modal active';
-            modal.innerHTML = `
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h3>向量详情</h3>
-                        <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
-                    </div>
-                    <div class="modal-body">
-                        ${detailsHTML}
-                    </div>
-                    <div class="modal-footer">
-                        <button class="btn-secondary" onclick="this.closest('.modal').remove()">关闭</button>
-                    </div>
-                </div>
-            `;
-
-            document.body.appendChild(modal);
+        function showPersonalCreateForm() {
+            renderCreateForm('personal');
         }
 
-        // 显示状态消息
-        function showStatus(message, type = 'info') {
-            const uploadStatus = document.getElementById('uploadStatus');
-            if (!uploadStatus) return;
+        function showClassCreateForm() {
+            renderCreateForm('class');
+        }
 
-            uploadStatus.innerHTML = `
-                <div class="status-message ${type}">
-                    ${message}
+        function renderDetailLoading() {
+            document.getElementById('knowledgeBaseDetail').innerHTML = '<div class="loading">加载中...</div>';
+        }
+
+        async function loadSources() {
+            selectedSources = [];
+            if (!selectedKnowledgeBase) return;
+            try {
+                const response = await fetch(`/api/knowledge-base/sources?knowledge_base=${encodeURIComponent(selectedKnowledgeBase.name)}`, {
+                    headers: authHeaders()
+                });
+                const data = await response.json();
+                if (data.code === 200) selectedSources = data.data || [];
+            } catch (error) {
+                selectedSources = [];
+            }
+        }
+
+        function renderDetail() {
+            const kb = selectedKnowledgeBase;
+            const canManage = isManageable(kb);
+            const typeText = kb.type === 'class' ? '班级知识库' : '个人知识库';
+            const ownerText = kb.type === 'class' ? `发布教师：${kb.owner_name}` : `所有人：${kb.owner_name}`;
+
+            document.getElementById('knowledgeBaseDetail').innerHTML = `
+                <div class="kb-detail-head">
+                    <div>
+                        <h2>${displayName(kb)}</h2>
+                        <p class="kb-detail-sub">${typeText} · ${ownerText}</p>
+                    </div>
+                    <div class="kb-actions">
+                        ${canManage ? `
+                            <button class="btn-secondary small" onclick="renameKnowledgeBase()">重命名</button>
+                            <button class="btn-danger small" onclick="deleteKnowledgeBase()">删除知识库</button>
+                        ` : ''}
+                    </div>
+                </div>
+
+                ${canManage ? renderUploadBox() : `
+                    <div class="kb-readonly-note">这是只读知识库。你可以在首页答疑中选择它进行问答，但不能上传、删除或修改其中的文件。</div>
+                `}
+
+                <div class="sources-section" style="box-shadow:none;border:0;padding:0;margin:0;">
+                    <div class="section-header">
+                        <h3>上传文件</h3>
+                        <p class="section-desc">${canManage ? '管理员、创建者或发布教师可以删除文件。' : '只读模式下仅可查看文件。'}</p>
+                    </div>
+                    <div class="sources-filter">
+                        <input type="text" id="sourceFilter" placeholder="搜索文件名..." oninput="renderFileList()">
+                    </div>
+                    <div class="kb-file-list" id="fileList"></div>
+                </div>
+                <div class="kb-status" id="kbStatus"></div>
+            `;
+            bindUploadArea();
+            renderFileList();
+        }
+
+        function renderUploadBox() {
+            return `
+                <div class="kb-upload-box">
+                    <div class="kb-upload-title">上传文档</div>
+                    <div class="kb-upload-area" id="uploadArea">
+                        <div style="font-size:30px;margin-bottom:8px;">📁</div>
+                        <div>拖拽文件到此处，或点击选择文件</div>
+                        <div class="upload-hint">支持 PDF、TXT、DOCX，上传成功后会出现在文件列表中</div>
+                        <input type="file" id="fileInput" accept=".pdf,.txt,.docx" multiple style="display:none;">
+                    </div>
                 </div>
             `;
-
-            // 3秒后自动隐藏
-            setTimeout(() => {
-                uploadStatus.innerHTML = '';
-            }, 3000);
         }
+
+        function renderFileList() {
+            const container = document.getElementById('fileList');
+            if (!container) return;
+
+            const keyword = normalizeName(document.getElementById('sourceFilter')?.value).toLowerCase();
+            const canManage = isManageable(selectedKnowledgeBase);
+            const sources = selectedSources.filter(source => {
+                const text = `${source.file_name || ''} ${source.file_path || ''}`.toLowerCase();
+                return !keyword || text.includes(keyword);
+            });
+
+            if (!sources.length) {
+                container.innerHTML = '<div class="empty-state">暂无上传文件</div>';
+                return;
+            }
+
+            container.innerHTML = sources.map(source => `
+                <div class="kb-file-item">
+                    <div>
+                        <div class="kb-file-name">${source.file_name || '未知文件'}</div>
+                        <div class="kb-file-path">${source.file_path || ''}</div>
+                    </div>
+                    ${canManage ? `<button class="btn-danger small" onclick="deleteSource('${encodeURIComponent(source.file_path || '')}')">删除</button>` : ''}
+                </div>
+            `).join('');
+        }
+
+        function bindUploadArea() {
+            const uploadArea = document.getElementById('uploadArea');
+            const fileInput = document.getElementById('fileInput');
+            if (!uploadArea || !fileInput) return;
+
+            uploadArea.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', () => uploadFiles(fileInput.files));
+            uploadArea.addEventListener('dragover', event => {
+                event.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+            uploadArea.addEventListener('drop', event => {
+                event.preventDefault();
+                uploadArea.classList.remove('dragover');
+                uploadFiles(event.dataTransfer.files);
+            });
+        }
+
+        async function uploadFiles(files) {
+            if (!files || !files.length || !selectedKnowledgeBase) return;
+            if (!isManageable(selectedKnowledgeBase)) {
+                setStatus('当前知识库只读，不能上传文档', 'error');
+                return;
+            }
+
+            for (const file of files) {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('knowledge_base', selectedKnowledgeBase.name);
+
+                setStatus(`正在上传 ${file.name}...`, 'info');
+                try {
+                    const response = await fetch('/api/knowledge-base/upload', {
+                        method: 'POST',
+                        headers: authHeaders(),
+                        body: formData
+                    });
+                    const data = await response.json();
+                    if (data.code !== 200) throw new Error(data.msg || data.error || '上传失败');
+                    setStatus(`${file.name} 上传成功`, 'success');
+                } catch (error) {
+                    setStatus(`${file.name} 上传失败：${error.message}`, 'error');
+                }
+            }
+
+            await loadSources();
+            renderFileList();
+        }
+
+        async function submitPersonalKnowledgeBase() {
+            const name = normalizeName(document.getElementById('createKnowledgeName')?.value);
+            if (!name) return;
+            if (name.includes('/') || name.includes('\\') || name.includes('.')) {
+                alert('知识库名称不能包含斜杠或点号');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/knowledge-base/create', {
+                    method: 'POST',
+                    headers: authHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ name })
+                });
+                const data = await response.json();
+                if (data.code !== 200) throw new Error(data.msg || data.error || '创建失败');
+                await loadKnowledgeBases(name);
+                setStatus('个人知识库已创建，可以上传文档了', 'success');
+            } catch (error) {
+                setStatus(`创建失败：${error.message}`, 'error');
+            }
+        }
+
+        async function submitClassKnowledgeBase() {
+            const className = normalizeName(document.getElementById('createKnowledgeName')?.value);
+            if (!className) return;
+            const description = normalizeName(document.getElementById('createKnowledgeDescription')?.value);
+
+            try {
+                const response = await fetch('/api/knowledge-base/class/create', {
+                    method: 'POST',
+                    headers: authHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ class_name: className, description })
+                });
+                const data = await response.json();
+                if (data.code !== 200) throw new Error(data.msg || data.error || '发布失败');
+                await loadKnowledgeBases(data.data.knowledge_base);
+                setStatus('班级知识库已发布，可以上传文档了', 'success');
+            } catch (error) {
+                setStatus(`发布失败：${error.message}`, 'error');
+            }
+        }
+
+        async function renameKnowledgeBase() {
+            if (!selectedKnowledgeBase || !isManageable(selectedKnowledgeBase)) return;
+            const oldName = selectedKnowledgeBase.name;
+            const label = selectedKnowledgeBase.type === 'class' ? '班级知识库名称' : '知识库名称';
+            const newName = normalizeName(prompt(`请输入新的${label}：`, displayName(selectedKnowledgeBase)));
+            if (!newName || newName === oldName) return;
+            if (newName.includes('/') || newName.includes('\\') || newName.includes('.')) {
+                alert('名称不能包含斜杠或点号');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/knowledge-base/rename', {
+                    method: 'POST',
+                    headers: authHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ old_name: oldName, new_name: newName })
+                });
+                const data = await response.json();
+                if (data.code !== 200) throw new Error(data.msg || data.error || '重命名失败');
+                await loadKnowledgeBases(newName);
+                setStatus('知识库已重命名', 'success');
+            } catch (error) {
+                alert(`重命名失败：${error.message}`);
+            }
+        }
+
+        async function deleteKnowledgeBase() {
+            if (!selectedKnowledgeBase || !isManageable(selectedKnowledgeBase)) return;
+            if (!confirm(`确定删除 "${displayName(selectedKnowledgeBase)}" 吗？此操作不可恢复。`)) return;
+
+            try {
+                const response = await fetch(`/api/knowledge-base/delete?knowledge_base=${encodeURIComponent(selectedKnowledgeBase.name)}`, {
+                    method: 'DELETE',
+                    headers: authHeaders()
+                });
+                const data = await response.json();
+                if (data.code !== 200) throw new Error(data.msg || data.error || '删除失败');
+                selectedKnowledgeBase = null;
+                await loadKnowledgeBases();
+            } catch (error) {
+                alert(`删除失败：${error.message}`);
+            }
+        }
+
+        async function deleteSource(encodedPath) {
+            if (!selectedKnowledgeBase || !isManageable(selectedKnowledgeBase)) return;
+            const filePath = decodeURIComponent(encodedPath);
+            if (!confirm(`确定删除文件 "${filePath}" 吗？`)) return;
+
+            try {
+                const response = await fetch(`/api/knowledge-base/sources/${encodedPath}?knowledge_base=${encodeURIComponent(selectedKnowledgeBase.name)}`, {
+                    method: 'DELETE',
+                    headers: authHeaders()
+                });
+                const data = await response.json();
+                if (data.code !== 200) throw new Error(data.msg || data.error || '删除失败');
+                setStatus('文件已删除', 'success');
+                await loadSources();
+                renderFileList();
+            } catch (error) {
+                setStatus(`删除失败：${error.message}`, 'error');
+            }
+        }
+
+        function setStatus(message, type = 'info') {
+            const status = document.getElementById('kbStatus');
+            if (!status) {
+                alert(message);
+                return;
+            }
+            status.textContent = message;
+            status.className = `kb-status ${type}`;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('createPersonalBtn')?.addEventListener('click', showPersonalCreateForm);
+            document.getElementById('createClassBtn')?.addEventListener('click', showClassCreateForm);
+            document.getElementById('emptyCreatePersonalBtn')?.addEventListener('click', showPersonalCreateForm);
+            loadKnowledgeBases();
+        });
     </script>
-    <script src="/static/js/shared.js"></script>
+    <script src="/static/js/shared.js?v=fix-text-20260612"></script>
 </body>
 </html>

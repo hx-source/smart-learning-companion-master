@@ -1,11 +1,4 @@
-/**
- * 跨页面共享脚本。
- *
- * 负责导航栏用户信息、模型状态、聊天历史缓存和历史记录渲染。
- * 多个模板都会加载这个文件，因此这里的函数尽量保持通用、无页面强绑定。
- */
-
-// 全局缓存对象：避免用户在首页/历史页之间切换时频繁请求同一批数据。
+// Shared frontend helpers.
 const globalCache = {
     userInfo: null,
     modelStatus: null,
@@ -16,47 +9,40 @@ const globalCache = {
         modelStatus: 0,
         sessions: 0
     },
-    cacheTime: 10 * 60 * 1000 // 缓存时间：10分钟
+    cacheTime: 10 * 60 * 1000 // ?????10??
 };
 
-// 从 cookie 中获取值，供需要读取 token/csrf_token 的页面复用。
 function getCookie(name) {
     const value = `; ${document.cookie}`;
     const parts = value.split(`; ${name}=`);
     if (parts.length === 2) return parts.pop().split(';').shift();
 }
 
-// 页面加载完成后执行：先显示用户和模型状态，再根据页面类型预加载数据。
 function initPage() {
     loadUserInfoAndModelStatus();
     
-    // 预加载数据
     if (window.location.pathname === '/') {
         // 在首页预加载其他页面可能需要的数据
         setTimeout(preloadData, 2000);
     }
     
-    // 其他页面特定的初始化逻辑由页面自身处理
 }
 
-// 预加载数据：延迟加载聊天历史，避免阻塞首页首屏渲染。
 async function preloadData() {
     const user = getCurrentUser();
     if (!user) return;
     
     try {
-        // 预加载聊天历史
         if (!globalCache.sessions) {
             await loadChatHistory();
         }
         
-        console.log('预加载数据完成');
+        console.log('preload complete');
     } catch (error) {
-        console.error('预加载数据失败:', error);
+        console.error('preload failed', error);
     }
 }
 
-// 获取当前用户信息：localStorage 可能为空或被手动改坏，因此需要 try/catch。
 function getCurrentUser() {
     try {
         return JSON.parse(localStorage.getItem('user'));
@@ -65,8 +51,6 @@ function getCurrentUser() {
     }
 }
 
-// 加载用户信息和模型状态（使用综合 API）。
-// 先用本地缓存快速渲染，再在后台刷新后端数据，兼顾速度和准确性。
 async function loadUserInfoAndModelStatus() {
     const user = getCurrentUser();
     
@@ -74,11 +58,9 @@ async function loadUserInfoAndModelStatus() {
     if (user) {
         displayUserInfo(user);
         
-        // 后台异步更新用户信息和模型状态，不阻塞页面加载
         const now = Date.now();
         if (!globalCache.userInfo || (now - globalCache.lastFetch.userInfo > globalCache.cacheTime)) {
             try {
-                // 使用综合 API 端点，一次请求拿到用户信息和模型状态。
                 const response = await fetch(`/api/dashboard?user_id=${user.id}`);
                 const data = await response.json();
                 
@@ -87,11 +69,9 @@ async function loadUserInfoAndModelStatus() {
                     globalCache.userInfo = data.data.user;
                     globalCache.lastFetch.userInfo = now;
                     
-                    // 更新模型状态缓存
                     globalCache.modelStatus = data.data.model_status;
                     globalCache.lastFetch.modelStatus = now;
                     
-                    // 更新模型状态显示
                     updateModelStatus(data.data.model_status);
                     
                     // 更新用户信息显示
@@ -102,7 +82,6 @@ async function loadUserInfoAndModelStatus() {
                 }
             } catch (error) {
                 console.error('后台更新数据失败:', error);
-                // 失败时尝试单独获取模型状态
                 setTimeout(checkModelStatus, 1000);
             }
         }
@@ -111,18 +90,22 @@ async function loadUserInfoAndModelStatus() {
     }
 }
 
-// 显示用户信息：导航栏头像优先展示用户上传图片，否则显示用户名首字母。
 function displayUserInfo(user) {
     const userInfoEl = document.getElementById('userInfo');
     const usernameEl = document.getElementById('username');
     const avatarEl = document.getElementById('navAvatar');
+    const adminNavItem = document.getElementById('adminNavItem');
     
     if (user) {
         if (userInfoEl) userInfoEl.style.display = 'flex';
         if (usernameEl) usernameEl.textContent = user.username;
+        if (adminNavItem) {
+            const canOpenAdmin = user.role === 'admin' || user.is_admin;
+            adminNavItem.style.display = canOpenAdmin ? 'flex' : 'none';
+            adminNavItem.style.pointerEvents = canOpenAdmin ? 'auto' : 'none';
+        }
         if (avatarEl) {
             if (user.avatar && user.avatar.startsWith('/static/avatars/')) {
-                // 添加随机参数避免浏览器缓存，头像更新后能立即看到新图。
                 const avatarUrl = `${user.avatar}?t=${Date.now()}`;
                 avatarEl.style.backgroundImage = `url(${avatarUrl})`;
                 avatarEl.style.backgroundSize = 'cover';
@@ -134,6 +117,7 @@ function displayUserInfo(user) {
             }
         }
     } else {
+        if (adminNavItem) adminNavItem.style.display = 'none';
         // 如果用户未登录，重定向到登录页面
         if (window.location.pathname !== '/login') {
             window.location.href = '/login';
@@ -149,7 +133,6 @@ function logout() {
     location.href = '/login';
 }
 
-// 检查模型状态：10 分钟内优先使用缓存，请求失败时也尽量保留旧状态展示。
 async function checkModelStatus() {
     const now = Date.now();
     
@@ -169,7 +152,7 @@ async function checkModelStatus() {
             updateModelStatus(data.data);
         }
     } catch (error) {
-        console.error('检查模型状态失败:', error);
+        console.error('????????', error);
         // 使用缓存数据作为后备
         if (globalCache.modelStatus) {
             updateModelStatus(globalCache.modelStatus);
@@ -177,13 +160,10 @@ async function checkModelStatus() {
     }
 }
 
-// 更新模型状态：根据当前选择的模型类型显示本地/云端可用状态。
 function updateModelStatus(status) {
     const statusEl = document.getElementById('modelStatus');
     if (statusEl) {
-        if (currentModelType === 'api') {
-            statusEl.innerHTML = '<span class="status-dot online"></span><span class="status-text">API模型: DeepSeek</span>';
-        } else if (status.connected) {
+        if (status.connected) {
             const modelName = status.configured_model || 'Ollama';
             statusEl.innerHTML = `<span class="status-dot online"></span><span class="status-text">本地模型: ${modelName}</span>`;
         } else {
@@ -192,9 +172,7 @@ function updateModelStatus(status) {
     }
 }
 
-// 加载聊天历史：会话列表缓存 10 分钟，减少频繁切换页面时的数据库压力。
 async function loadChatHistory() {
-    // 检查缓存是否有效
     const now = Date.now();
     if (globalCache.sessions && (now - globalCache.lastFetch.sessions < globalCache.cacheTime)) {
         renderChatHistory(globalCache.sessions);
@@ -217,7 +195,6 @@ async function loadChatHistory() {
     }
 }
 
-// 渲染聊天历史：把后端按 session 分组后的数据转换成侧边栏列表。
 function renderChatHistory(sessions) {
     const historyList = document.getElementById('historyList');
     if (!historyList) return;
@@ -225,7 +202,7 @@ function renderChatHistory(sessions) {
     if (sessions.length === 0) {
         historyList.innerHTML = `
             <div class="history-empty">
-                <div class="history-empty-icon">📝</div>
+                <div class="history-empty-icon">DOC</div>
                 <div>暂无聊天记录</div>
             </div>
         `;
@@ -237,11 +214,11 @@ function renderChatHistory(sessions) {
             <div class="history-item-content" onclick="loadSession('${session.session_id}')">
                 <div class="history-item-title">${session.first_question}</div>
                 <div class="history-item-meta">
-                    <span class="history-item-count">${session.count} 条</span>
+                    <span class="history-item-count">${session.count} \u6761</span>
                     <span class="history-item-time">${session.time_ago}</span>
                 </div>
             </div>
-            <button class="history-item-delete" onclick="deleteSession('${session.session_id}')" title="删除会话">🗑️</button>
+            <button class="history-item-delete" onclick="deleteSession('${session.session_id}')" title="\u5220\u9664\u4f1a\u8bdd">\u5220\u9664</button>
         </div>
     `).join('');
 }
@@ -257,7 +234,6 @@ async function loadSession(sessionId) {
         }
     });
     
-    // 检查缓存
     if (globalCache.sessionDetails[sessionId]) {
         renderSessionMessages(globalCache.sessionDetails[sessionId]);
         return;
@@ -281,7 +257,7 @@ function renderSessionMessages(records) {
     container.innerHTML = '';
     
     if (!records || records.length === 0) {
-        container.innerHTML = '<div class="history-empty"><div class="history-empty-icon">📝</div><div>暂无消息</div></div>';
+        container.innerHTML = '<div class="history-empty"><div class="history-empty-icon">DOC</div><div>\u6682\u65e0\u6d88\u606f</div></div>';
         return;
     }
     
@@ -289,16 +265,16 @@ function renderSessionMessages(records) {
         const userMsg = document.createElement('div');
         userMsg.className = 'message user';
         userMsg.innerHTML = `
-            <div class="message-avatar">👤</div>
+            <div class="message-avatar">U</div>
             <div class="message-content">${escapeHtml(record.question)}</div>
-            <button class="message-delete" onclick="deleteMessage(${record.id})">🗑️</button>
+            <button class="message-delete" onclick="deleteMessage(${record.id})" title="\u5220\u9664\u6d88\u606f">\u5220\u9664</button>
         `;
         container.appendChild(userMsg);
         
         const aiMsg = document.createElement('div');
         aiMsg.className = 'message ai';
         aiMsg.innerHTML = `
-            <div class="message-avatar">🤖</div>
+            <div class="message-avatar">AI</div>
             <div class="message-content">${formatMessage(record.ai_answer)}</div>
         `;
         container.appendChild(aiMsg);
@@ -307,16 +283,15 @@ function renderSessionMessages(records) {
     container.scrollTop = container.scrollHeight;
 }
 
-// 格式化消息
 function formatMessage(content) {
-    return escapeHtml(content)
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-        .replace(/`(.+?)`/g, '<code>$1</code>')
-        .replace(/\n/g, '<br>');
+    let formatted = escapeHtml(content || '');
+    formatted = formatted.replace(new RegExp('\\*\\*(.+?)\\*\\*', 'g'), '<strong>$1</strong>');
+    formatted = formatted.replace(new RegExp('```([\\s\\S]*?)```', 'g'), '<pre><code>$1</code></pre>');
+    formatted = formatted.replace(new RegExp('`(.+?)`', 'g'), '<code>$1</code>');
+    formatted = formatted.replace(new RegExp('\\n', 'g'), '<br>');
+    return formatted;
 }
 
-// 转义HTML
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -325,14 +300,14 @@ function escapeHtml(text) {
 
 // 删除消息
 function deleteMessage(recordId) {
-    if (!confirm('确定要删除这条消息吗？')) {
+    if (!confirm('\u786e\u5b9a\u8981\u5220\u9664\u8fd9\u6761\u6d88\u606f\u5417\uff1f')) {
         return;
     }
     
     const user = getCurrentUser();
     const userId = user ? user.id : 1;
     
-    console.log('删除消息开始:', recordId, currentSessionId);
+    console.log('delete message start', recordId, currentSessionId);
     
     // 立即从UI中移除消息，提供即时反馈
     const messageElements = document.querySelectorAll(`.message-delete[onclick="deleteMessage(${recordId})"]`);
@@ -345,7 +320,7 @@ function deleteMessage(recordId) {
                 aiMessage.remove();
             }
             userMessage.remove();
-            console.log('消息已从UI中移除');
+            console.log('message removed from UI');
         }
     });
     
@@ -361,27 +336,22 @@ function deleteMessage(recordId) {
     .then(async data => {
         console.log('删除响应:', data);
         
-        // 清除所有相关缓存
         if (currentSessionId) {
             delete globalCache.sessionDetails[currentSessionId];
-            console.log('会话缓存已清除:', currentSessionId);
+            console.log('session cache cleared', currentSessionId);
         }
         globalCache.sessions = null;
         globalCache.lastFetch.sessions = 0;
-        console.log('聊天历史缓存已清除');
+        console.log('chat history cache cleared');
         
-        // 只重新加载聊天历史，确保聊天历史列表与后端数据一致
-        // 不再重新加载会话，避免重新渲染消息
-        console.log('重新加载聊天历史');
+        console.log('reload chat history');
         await loadChatHistory();
         
-        // 不再显示404提示，因为消息已经从UI中移除
-        console.log('删除操作完成');
+        console.log('delete message complete');
     })
     .catch(error => {
         console.error('删除消息失败:', error);
-        // 不再显示错误提示，因为消息已经从UI中移除
-        // 如果请求失败，重新加载数据以恢复UI
+        // 不再显示错误提示，因为消息已经从UI中移�?        // 如果请求失败，重新加载数据以恢复UI
         if (currentSessionId) {
             delete globalCache.sessionDetails[currentSessionId];
             loadSession(currentSessionId);
@@ -391,41 +361,38 @@ function deleteMessage(recordId) {
 
 // 删除会话
 function deleteSession(sessionId) {
-    if (!confirm('确定要删除整个会话吗？')) {
+    if (!confirm('\u786e\u5b9a\u8981\u5220\u9664\u6574\u4e2a\u4f1a\u8bdd\u5417\uff1f')) {
         return;
     }
     
     const user = getCurrentUser();
     const userId = user ? user.id : 1;
     
-    console.log('删除会话开始:', sessionId);
+    console.log('delete session start', sessionId);
     
-    // 立即从UI中移除会话项，提供即时反馈
     const sessionElement = document.querySelector(`.history-item[data-session-id="${sessionId}"]`);
     if (sessionElement) {
         sessionElement.remove();
-        console.log('会话项已从UI中移除');
+        console.log('session item removed from UI');
     }
     
-    // 如果当前正在查看的会话被删除，清空聊天消息区域
     if (currentSessionId === sessionId) {
         const chatMessages = document.getElementById('chatMessages');
         if (chatMessages) {
             chatMessages.innerHTML = `
                 <div class="message ai">
-                    <div class="message-avatar">🤖</div>
+                    <div class="message-avatar">AI</div>
                     <div class="message-content">
-                        你好！我是智学伴AI助手 👋<br><br>
-                        我可以帮你：<br>
-                        • 解答学习问题<br>
-                        • 解释概念和公式<br>
-                        • 提供学习建议<br><br>
-                        请在下方输入你的问题，开始学习吧！
-                    </div>
+                        \u4f60\u597d\uff01\u6211\u662f\u667a\u5b66\u4f34AI\u52a9\u624b<br><br>
+                        \u6211\u53ef\u4ee5\u5e2e\u4f60\uff1a<br>
+                        - \u89e3\u7b54\u5b66\u4e60\u95ee\u9898<br>
+                        - \u89e3\u91ca\u6982\u5ff5\u548c\u516c\u5f0f<br>
+                        - \u63d0\u4f9b\u5b66\u4e60\u5efa\u8bae<br><br>
+                        \u8bf7\u5728\u4e0b\u65b9\u8f93\u5165\u4f60\u7684\u95ee\u9898\uff0c\u5f00\u59cb\u5b66\u4e60\u5427\u3002
                 </div>
             `;
             currentSessionId = null;
-            console.log('聊天消息区域已清空');
+            console.log('chat messages cleared');
         }
     }
     
@@ -441,15 +408,13 @@ function deleteSession(sessionId) {
     .then(async data => {
         console.log('删除会话响应:', data);
         
-        // 清除所有相关缓存
         delete globalCache.sessionDetails[sessionId];
         globalCache.sessions = null;
         globalCache.lastFetch.sessions = 0;
-        console.log('会话缓存已清除:', sessionId);
-        console.log('聊天历史缓存已清除');
+        console.log('session cache cleared', sessionId);
+        console.log('chat history cache cleared');
         
-        // 重新加载聊天历史，确保聊天历史列表与后端数据一致
-        console.log('重新加载聊天历史');
+        console.log('reload chat history');
         await loadChatHistory();
         
         console.log('删除会话操作完成');
@@ -477,6 +442,78 @@ function addMessage(content, type) {
     container.scrollTop = container.scrollHeight;
 }
 
+function addStreamingMessage() {
+    const container = document.getElementById('chatMessages');
+    if (!container) return null;
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message ai';
+    messageDiv.innerHTML = `
+        <div class="message-avatar">🤖</div>
+        <div class="message-content"></div>
+    `;
+    container.appendChild(messageDiv);
+    container.scrollTop = container.scrollHeight;
+    return messageDiv.querySelector('.message-content');
+}
+
+function updateStreamingMessage(contentEl, text) {
+    if (!contentEl) return;
+    contentEl.innerHTML = formatMessage(text || '');
+    const container = document.getElementById('chatMessages');
+    if (container) {
+        container.scrollTop = container.scrollHeight;
+    }
+}
+
+function updateStreamingStatus(contentEl, text) {
+    if (!contentEl) return;
+    contentEl.innerHTML = `
+        <div class="stream-status">
+            <div class="loading-dots"><span></span><span></span><span></span></div>
+            <span>${escapeHtml(text || '\u6b63\u5728\u5904\u7406...')}</span>
+        </div>
+    `;
+    const container = document.getElementById('chatMessages');
+    if (container) {
+        container.scrollTop = container.scrollHeight;
+    }
+}
+
+function renderAnswerSources(contentEl, sources) {
+    if (!contentEl || !Array.isArray(sources) || sources.length === 0) return;
+
+    const sourceBox = document.createElement('div');
+    sourceBox.className = 'answer-sources';
+    sourceBox.innerHTML = `
+        <div class="answer-sources-title">\u53c2\u8003\u6765\u6e90</div>
+        ${sources.map((source, index) => {
+            const fileName = escapeHtml(source.file_name || '\u672a\u77e5\u6587\u4ef6');
+            const knowledgeBase = escapeHtml(source.knowledge_base_name || source.knowledge_base || '');
+            const chunkText = source.chunk_index !== null && source.chunk_index !== undefined
+                ? ` \u00b7 \u7247\u6bb5 ${escapeHtml(String(source.chunk_index))}`
+                : '';
+            const snippetText = source.content ? String(source.content).slice(0, 220) : '';
+            const snippet = snippetText
+                ? `<div class="answer-source-content">${escapeHtml(snippetText)}</div>`
+                : '';
+            return `
+                <div class="answer-source-item">
+                    <div class="answer-source-head">${index + 1}. ${fileName}</div>
+                    <div class="answer-source-meta">\u77e5\u8bc6\u5e93\uff1a${knowledgeBase}${chunkText}</div>
+                    ${snippet}
+                </div>
+            `;
+        }).join('')}
+    `;
+
+    contentEl.appendChild(sourceBox);
+    const container = document.getElementById('chatMessages');
+    if (container) {
+        container.scrollTop = container.scrollHeight;
+    }
+}
+
 // 添加加载消息
 function addLoadingMessage() {
     const container = document.getElementById('chatMessages');
@@ -487,7 +524,7 @@ function addLoadingMessage() {
     loadingDiv.id = id;
     loadingDiv.className = 'message ai';
     loadingDiv.innerHTML = `
-        <div class="message-avatar">🤖</div>
+        <div class="message-avatar">AI</div>
         <div class="message-content">
             <div class="loading-dots"><span></span><span></span><span></span></div>
         </div>
@@ -506,34 +543,23 @@ function removeLoadingMessage(id) {
 
 // 切换模型
 function switchModel(type) {
-    currentModelType = type;
-    document.getElementById('apiBtn').classList.toggle('active', type === 'api');
-    document.getElementById('ollamaBtn').classList.toggle('active', type === 'ollama');
-    localStorage.setItem('preferredModel', type);
-    
-    // 更新模型状态显示
-    if (type === 'api') {
-        const statusEl = document.getElementById('modelStatus');
-        if (statusEl) {
-            statusEl.innerHTML = '<span class="status-dot online"></span><span class="status-text">API模型: DeepSeek</span>';
-        }
-    } else {
-        // 对于本地模型，强制清除缓存并重新检查状态
-        globalCache.modelStatus = null;
-        globalCache.lastFetch.modelStatus = 0;
-        checkModelStatus();
-    }
+    currentModelType = 'ollama';
+    localStorage.setItem('preferredModel', 'ollama');
+    const ollamaBtn = document.getElementById('ollamaBtn');
+    if (ollamaBtn) ollamaBtn.classList.add('active');
+    globalCache.modelStatus = null;
+    globalCache.lastFetch.modelStatus = 0;
+    checkModelStatus();
 }
 
 // 加载模型偏好设置
 function loadModelPreference() {
-    const preferred = localStorage.getItem('preferredModel');
-    if (preferred) {
-        switchModel(preferred);
+    if (localStorage.getItem('preferredModel') === 'api') {
+        localStorage.removeItem('preferredModel');
     }
+    switchModel('ollama');
 }
 
-// 切换知识库开关
 function toggleKnowledgeBase() {
     knowledgeBaseEnabled = !knowledgeBaseEnabled;
     const btn = document.getElementById('kbToggleBtn');
@@ -542,14 +568,14 @@ function toggleKnowledgeBase() {
 
     if (knowledgeBaseEnabled) {
         btn.classList.add('active');
-        status.textContent = '开启';
+        status.textContent = '\u5f00\u542f';
         status.classList.add('active');
         if (kbSelector) {
             kbSelector.style.display = 'block';
         }
     } else {
         btn.classList.remove('active');
-        status.textContent = '关闭';
+        status.textContent = '\u5173\u95ed';
         status.classList.remove('active');
         if (kbSelector) {
             kbSelector.style.display = 'none';
@@ -560,7 +586,6 @@ function toggleKnowledgeBase() {
     localStorage.setItem('knowledgeBaseEnabled', knowledgeBaseEnabled);
 }
 
-// 加载知识库偏好设置
 function loadKnowledgeBasePreference() {
     const saved = localStorage.getItem('knowledgeBaseEnabled');
     // 默认开启知识库功能
@@ -571,7 +596,7 @@ function loadKnowledgeBasePreference() {
         const kbSelector = document.getElementById('kbSelector');
         if (btn) btn.classList.add('active');
         if (status) {
-            status.textContent = '开启';
+            status.textContent = '\u5f00\u542f';
             status.classList.add('active');
         }
         if (kbSelector) {
@@ -612,7 +637,7 @@ function handleKeyPress(event) {
     }
 }
 
-// 发送问题
+// Send question
 async function sendQuestion() {
     const input = document.getElementById('questionInput');
     const question = input.value.trim();
@@ -626,47 +651,76 @@ async function sendQuestion() {
     input.value = '';
 
     const loadingId = addLoadingMessage();
+    const selectedKnowledgeBase = currentKnowledgeBase || '';
+    const useKnowledgeBase = knowledgeBaseEnabled && Boolean(selectedKnowledgeBase);
 
     try {
-        // 根据知识库开关选择API端点
-        const apiEndpoint = knowledgeBaseEnabled ? '/api/ask-with-kb' : '/api/ask';
-
-        const response = await fetch(apiEndpoint, {
+        const response = await fetch('/api/ask-with-kb/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 question: question,
                 user_id: userId,
-                model_type: currentModelType,
+                model_type: 'ollama',
                 session_id: currentSessionId,
-                knowledge_base: currentKnowledgeBase
+                knowledge_base: selectedKnowledgeBase,
+                knowledge_base_enabled: useKnowledgeBase
             })
         });
 
-        const data = await response.json();
         removeLoadingMessage(loadingId);
 
-        if (data.code === 200) {
-            // 如果使用了知识库，添加标记
-            let answer = data.data.answer;
-            if (data.data.knowledge_base_used) {
-                answer = '🧠 **基于知识库回答**\n\n' + answer;
+        if (!response.ok || !response.body) {
+            addMessage('\u62b1\u6b49\uff0c\u51fa\u9519\u4e86\uff1a\u65e0\u6cd5\u5efa\u7acb\u6d41\u5f0f\u8fde\u63a5', 'ai');
+            return;
+        }
+
+        const contentEl = addStreamingMessage();
+        updateStreamingStatus(contentEl, useKnowledgeBase ? '\u6b63\u5728\u68c0\u7d22\u77e5\u8bc6\u5e93...' : '\u6b63\u5728\u8c03\u7528\u672c\u5730\u6a21\u578b...');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let answer = '';
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+
+                const event = JSON.parse(line);
+                if (event.type === 'token') {
+                    answer += event.content || '';
+                    updateStreamingMessage(contentEl, answer);
+                } else if (event.type === 'status') {
+                    if (!answer) {
+                        updateStreamingStatus(contentEl, event.content);
+                    }
+                } else if (event.type === 'done') {
+                    currentSessionId = event.data.session_id;
+                    if (event.data.knowledge_base_used && event.data.sources && event.data.sources.length) {
+                        renderAnswerSources(contentEl, event.data.sources);
+                    }
+                    globalCache.sessions = null;
+                    loadChatHistory();
+                } else if (event.type === 'error') {
+                    answer += `\\n\\n\u62b1\u6b49\uff0c\u51fa\u9519\u4e86\uff1a${event.msg}`;
+                    updateStreamingMessage(contentEl, answer);
+                }
             }
-            addMessage(answer, 'ai');
-            currentSessionId = data.data.session_id;
-            // 清除缓存，强制重新加载
-            globalCache.sessions = null;
-            loadChatHistory();
-        } else {
-            addMessage('抱歉，出错了：' + data.msg, 'ai');
         }
     } catch (error) {
         removeLoadingMessage(loadingId);
-        addMessage('网络错误，请稍后重试', 'ai');
+        addMessage('\u7f51\u7edc\u9519\u8bef\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5', 'ai');
     }
 }
 
-// 通用工具函数
+// Utilities
 function showStatus(message, type) {
     const statusElement = document.getElementById('uploadStatus');
     if (!statusElement) return;

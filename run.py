@@ -43,6 +43,9 @@ def init_database():
         
         # 创建所有表
         db.create_all()
+        schema_hook = getattr(flask_app, '_ensure_runtime_schema', None)
+        if schema_hook:
+            schema_hook()
         
         if not is_reloader:
             print("✅ 数据库表创建完成")

@@ -28,18 +28,6 @@ class Config:
     SQLALCHEMY_POOL_RECYCLE = 280
     SQLALCHEMY_MAX_OVERFLOW = 5
     
-    # DeepSeek API 配置：云端大模型调用所需的密钥和模型名。
-    DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
-    DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
-    DEEPSEEK_MODEL = 'deepseek-chat'
-    
-    # Kimi API配置
-    KIMI_API_KEY = os.getenv('KIMI_API_KEY')
-    KIMI_BASE_URL = 'https://api.moonshot.cn'
-    
-    # 智谱AI配置
-    ZHIPU_API_KEY = os.getenv('ZHIPU_API_KEY')
-
     # Ollama 本地模型配置：用于本地问答、嵌入向量生成和检索结果重排。
     OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
     OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5:7b')  # 生成模型

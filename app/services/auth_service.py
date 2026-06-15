@@ -139,6 +139,8 @@ def token_required(f):
         auth_header = request.headers.get('Authorization')
         if auth_header and auth_header.startswith('Bearer '):
             token = auth_header.split(' ')[1]
+        if not token:
+            token = request.cookies.get('token')
 
         if not token:
             return jsonify({'error': '缺少认证令牌'}), 401
@@ -154,6 +156,24 @@ def token_required(f):
         request.current_user = user
         return f(*args, **kwargs)
     return decorated
+
+
+def role_required(*roles):
+    """Require the current JWT user to have one of the given roles."""
+    def decorator(f):
+        @wraps(f)
+        @token_required
+        def decorated(*args, **kwargs):
+            user = request.current_user
+            user_role = user.role or ('admin' if user.is_admin else 'student')
+            if user_role not in roles and not user.is_admin:
+                return jsonify({'error': 'Permission denied'}), 403
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+
+admin_required = role_required('admin')
 
 
 def csrf_protect(f):

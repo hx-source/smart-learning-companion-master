@@ -482,39 +482,15 @@ def change_password():
 @bp.route('/api-keys', methods=['GET'])
 @token_required
 def get_api_keys():
-    """获取用户的API密钥配置"""
-    user = request.current_user
-    return jsonify({
-        'code': 200,
-        'deepseek_api_key': user.deepseek_api_key,
-        'kimi_api_key': user.kimi_api_key,
-        'zhipu_api_key': user.zhipu_api_key
-    })
+    """API key configuration has been disabled; the system uses local Ollama only."""
+    return jsonify({'code': 410, 'error': 'API key configuration is disabled; local Ollama is used only'}), 410
 
 
 @bp.route('/api-keys', methods=['POST'])
 @token_required
 def update_api_keys():
-    """更新用户的API密钥配置"""
-    data = request.get_json()
-    user = request.current_user
-
-    # 更新API密钥
-    user.deepseek_api_key = data.get('deepseek_api_key')
-    user.kimi_api_key = data.get('kimi_api_key')
-    user.zhipu_api_key = data.get('zhipu_api_key')
-
-    db.session.commit()
-
-    UserLog.log(
-        user.id, 'API_KEYS_UPDATE',
-        ip_address=request.remote_addr,
-        user_agent=request.headers.get('User-Agent'),
-        details="API密钥配置已更新",
-        status='success'
-    )
-
-    return jsonify({'message': 'API密钥配置已更新'})
+    """API key configuration has been disabled; the system uses local Ollama only."""
+    return jsonify({'code': 410, 'error': 'API key configuration is disabled; local Ollama is used only'}), 410
 
 
 @bp.route('/resend-verification', methods=['POST'])

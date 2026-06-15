@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理员后台 - 智学伴</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script defer src="/static/js/shared.js?v=fix-text-20260612"></script>
+    <style>
+        .admin-page { max-width: 1180px; margin: 24px auto; padding: 0 20px; }
+        .admin-grid { display: grid; grid-template-columns: 340px 1fr; gap: 20px; align-items: start; }
+        .admin-panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 18px; box-shadow: 0 8px 24px rgba(15, 23, 42, .06); }
+        .admin-panel h2 { margin: 0 0 14px; font-size: 18px; color: #111827; }
+        .admin-form { display: grid; gap: 12px; }
+        .admin-form label { display: grid; gap: 6px; font-size: 13px; color: #374151; }
+        .admin-form input, .admin-form select { height: 38px; border: 1px solid #d1d5db; border-radius: 6px; padding: 0 10px; }
+        .admin-actions { display: flex; gap: 8px; align-items: center; }
+        .admin-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .admin-table th, .admin-table td { border-bottom: 1px solid #eef2f7; padding: 10px 8px; text-align: left; }
+        .admin-table th { color: #4b5563; background: #f9fafb; }
+        .admin-table select { height: 32px; border: 1px solid #d1d5db; border-radius: 6px; }
+        .admin-btn { height: 36px; border: 0; border-radius: 6px; padding: 0 12px; cursor: pointer; background: #2563eb; color: #fff; }
+        .admin-btn.secondary { background: #eef2ff; color: #1d4ed8; }
+        .admin-btn.danger { background: #dc2626; }
+        .admin-status { min-height: 22px; margin: 12px 0; color: #374151; }
+        @media (max-width: 860px) { .admin-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    {% include 'components/navbar.html' %}
+    <main class="admin-page">
+        <h1 class="page-title">管理员后台</h1>
+        <div class="admin-grid">
+            <section class="admin-panel">
+                <h2>创建用户</h2>
+                <form class="admin-form" id="createUserForm">
+                    <label>用户名<input id="newUsername" required minlength="3"></label>
+                    <label>邮箱<input id="newEmail" type="email"></label>
+                    <label>初始密码<input id="newPassword" type="password" required placeholder="8-20位，含大小写和数字"></label>
+                    <label>角色
+                        <select id="newRole">
+                            <option value="student">学生</option>
+                            <option value="teacher">教师</option>
+                            <option value="admin">管理员</option>
+                        </select>
+                    </label>
+                    <button class="admin-btn" type="submit">创建</button>
+                </form>
+                <div class="admin-status" id="adminStatus"></div>
+            </section>
+
+            <section class="admin-panel">
+                <div class="admin-actions">
+                    <h2 style="flex: 1;">用户与权限</h2>
+                    <button class="admin-btn secondary" onclick="loadAdminData()">刷新</button>
+                </div>
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>用户名</th>
+                            <th>邮箱</th>
+                            <th>角色</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTableBody"></tbody>
+                </table>
+            </section>
+        </div>
+
+        <section class="admin-panel" style="margin-top: 20px;">
+            <h2>班级知识库</h2>
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>班级</th>
+                        <th>知识库</th>
+                        <th>教师</th>
+                        <th>创建时间</th>
+                    </tr>
+                </thead>
+                <tbody id="classKbTableBody"></tbody>
+            </table>
+        </section>
+    </main>
+
+    <script>
+        const roleLabels = { student: '学生', teacher: '教师', admin: '管理员' };
+
+        function adminHeaders(json = true) {
+            const headers = { Authorization: `Bearer ${localStorage.getItem('token') || getCookie('token')}` };
+            if (json) headers['Content-Type'] = 'application/json';
+            return headers;
+        }
+
+        function setAdminStatus(message) {
+            document.getElementById('adminStatus').textContent = message || '';
+        }
+
+        async function loadAdminData() {
+            const [usersRes, classKbRes] = await Promise.all([
+                fetch('/api/admin/users', { headers: adminHeaders(false) }),
+                fetch('/api/admin/class-knowledge-bases', { headers: adminHeaders(false) })
+            ]);
+            const usersData = await usersRes.json();
+            const classKbData = await classKbRes.json();
+
+            const usersBody = document.getElementById('usersTableBody');
+            usersBody.innerHTML = (usersData.data || []).map(user => `
+                <tr>
+                    <td>${user.id}</td>
+                    <td>${escapeHtml(user.username || '')}</td>
+                    <td>${escapeHtml(user.email || '')}</td>
+                    <td>
+                        <select onchange="updateUserRole(${user.id}, this.value)">
+                            ${Object.keys(roleLabels).map(role => `<option value="${role}" ${user.role === role ? 'selected' : ''}>${roleLabels[role]}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td><button class="admin-btn danger" onclick="deleteUser(${user.id})">删除</button></td>
+                </tr>
+            `).join('');
+
+            const classBody = document.getElementById('classKbTableBody');
+            classBody.innerHTML = (classKbData.data || []).map(item => `
+                <tr>
+                    <td>${escapeHtml(item.class_name || '')}</td>
+                    <td>${escapeHtml(item.knowledge_base || '')}</td>
+                    <td>${escapeHtml(item.teacher_name || '')}</td>
+                    <td>${escapeHtml(item.created_at || '')}</td>
+                </tr>
+            `).join('');
+        }
+
+        async function updateUserRole(userId, role) {
+            const res = await fetch(`/api/admin/users/${userId}`, {
+                method: 'PUT',
+                headers: adminHeaders(),
+                body: JSON.stringify({ role })
+            });
+            const data = await res.json();
+            setAdminStatus(data.code === 200 ? '角色已更新' : (data.msg || data.error || '更新失败'));
+            loadAdminData();
+        }
+
+        async function deleteUser(userId) {
+            if (!confirm('确定删除这个用户吗？')) return;
+            const res = await fetch(`/api/admin/users/${userId}`, {
+                method: 'DELETE',
+                headers: adminHeaders(false)
+            });
+            const data = await res.json();
+            setAdminStatus(data.code === 200 ? '用户已删除' : (data.msg || data.error || '删除失败'));
+            loadAdminData();
+        }
+
+        document.getElementById('createUserForm').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const payload = {
+                username: document.getElementById('newUsername').value.trim(),
+                email: document.getElementById('newEmail').value.trim(),
+                password: document.getElementById('newPassword').value,
+                role: document.getElementById('newRole').value
+            };
+            const res = await fetch('/api/admin/users', {
+                method: 'POST',
+                headers: adminHeaders(),
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.code === 201) {
+                event.target.reset();
+                setAdminStatus('用户已创建');
+                loadAdminData();
+            } else {
+                setAdminStatus(data.msg || data.error || '创建失败');
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', loadAdminData);
+    </script>
+</body>
+</html>

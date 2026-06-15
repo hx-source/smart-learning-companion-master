@@ -31,7 +31,7 @@ class QAModule:
         
         Args:
             knowledge_base_name: 知识库名称
-            model_type: 模型类型 (api 或 ollama)
+            model_type: 保留兼容参数，当前始终使用本地 Ollama
         """
         if knowledge_base_name not in cls._instances:
             cls._instances[knowledge_base_name] = super(QAModule, cls).__new__(cls)
@@ -42,7 +42,7 @@ class QAModule:
         
         Args:
             knowledge_base_name: 知识库名称
-            model_type: 模型类型 (api 或 ollama)
+            model_type: 保留兼容参数，当前始终使用本地 Ollama
         """
         if not hasattr(self, 'initialized'):
             # 这些成员只在首次创建实例时初始化；后续从 _instances 取出时不重复加载。
@@ -99,16 +99,31 @@ class QAModule:
 
         return answer
 
-    def query_with_knowledge(self, question, history=None, model_type=None):
+    def query_with_knowledge(self, question, history=None, model_type=None, user=None):
         """处理用户查询，返回带知识库来源的回答
 
         Args:
             question: 用户问题
             history: 对话历史
-            model_type: 模型类型 (api 或 ollama)
+            model_type: 保留兼容参数，当前始终使用本地 Ollama
 
         Returns:
             dict: 包含 answer 和 sources 的字典
+        """
+        context, sources = self.retrieve_context_and_sources(question)
+        prompt = self._build_prompt(question, context)
+        answer = self._call_llm(prompt, model_type, user=user)
+
+        return {
+            'answer': answer,
+            'sources': sources,
+            'context_used': bool(context.strip())
+        }
+
+    def retrieve_context_and_sources(self, question):
+        """检索知识库上下文和来源信息。
+
+        非流式和流式问答都会先调用这里，保证召回、重排、来源展示逻辑一致。
         """
         # 搜索相关文档（召回阶段）：先取更多候选，给重排阶段留下选择空间。
         search_results = self.vector_store.search(question, n_results=10)  # 先召回更多文档
@@ -123,12 +138,6 @@ class QAModule:
 
         # 将召回的文档片段拼接成上下文，交给生成模型参考。
         context = self._build_context(search_results)
-
-        # 构建提示词
-        prompt = self._build_prompt(question, context)
-
-        # 调用LLM生成回答
-        answer = self._call_llm(prompt, model_type)
 
         # 构建来源信息：前端可展示“答案参考了哪些文档片段”。
         sources = []
@@ -158,11 +167,17 @@ class QAModule:
                     
                     sources.append(source_info)
 
-        return {
-            'answer': answer,
-            'sources': sources,
-            'context_used': bool(context.strip())
-        }
+        return context, sources
+
+    def stream_with_knowledge(self, question, model_type=None, user=None):
+        """流式生成知识库回答。
+
+        Yields:
+            str: 模型逐步生成的文本片段。
+        """
+        context, sources = self.retrieve_context_and_sources(question)
+        prompt = self._build_prompt(question, context)
+        return self._stream_llm(prompt, model_type, user=user), sources, bool(context.strip())
 
     def _build_context(self, search_results):
         """构建上下文
@@ -208,7 +223,7 @@ class QAModule:
         safe_context = context if context.strip() else "未检索到相关知识库上下文。"
         return self.prompt_template.format(context=safe_context, question=question)
 
-    def _call_llm(self, prompt, model_type=None):
+    def _call_llm(self, prompt, model_type=None, user=None):
         """调用LLM
 
         Args:
@@ -218,29 +233,37 @@ class QAModule:
         Returns:
             回答
         """
-        # 确定使用的模型类型：接口参数优先，其次使用实例默认值。
-        use_model_type = model_type or self.model_type
-        
         try:
-            if use_model_type == 'api':
-                # 使用AI服务调用API模型
-                from app.services.ai_service import AIService
-                ai_service = AIService()
-                result = ai_service.ask_question(prompt, model_type='api')
-                return result['answer']
-            else:
-                # 使用 LangChain 的 ChatOllama 调用本地模型。
-                llm = ChatOllama(
-                    base_url=self.ollama_url,
-                    model=self.llm_model,
-                    temperature=0.7,
-                    num_predict=1000,
-                )
-                chain = llm | StrOutputParser()
-                return chain.invoke(prompt)
+            llm = ChatOllama(
+                base_url=self.ollama_url,
+                model=self.llm_model,
+                temperature=0.7,
+                num_predict=1000,
+            )
+            chain = llm | StrOutputParser()
+            return chain.invoke(prompt)
             
         except Exception as e:
             return f"API 调用失败: {str(e)}"
+
+    def _stream_llm(self, prompt, model_type=None, user=None):
+        """流式调用 LLM。
+
+        当前只使用 LangChain ChatOllama 逐 token/片段返回。
+        """
+        try:
+            llm = ChatOllama(
+                base_url=self.ollama_url,
+                model=self.llm_model,
+                temperature=0.7,
+                num_predict=1000,
+            )
+            chain = llm | StrOutputParser()
+            for chunk in chain.stream(prompt):
+                if chunk:
+                    yield chunk
+        except Exception as e:
+            yield f"API 调用失败: {str(e)}"
 
     def add_document(self, file_path, metadata=None):
         """添加文档到知识库
@@ -256,6 +279,7 @@ class QAModule:
         from app.utils.text_splitter import TextSplitter
 
         try:
+            self.last_error = None
             # 先删除该文件的旧向量（如果存在）。
             # 这样同名文件重复上传时不会留下旧片段，避免检索结果重复或过期。
             self.delete_by_source(file_path)
@@ -285,7 +309,8 @@ class QAModule:
 
             return True
         except Exception as e:
-            print(f"添加文档时出错: {str(e)}")
+            self.last_error = str(e)
+            print(f"添加文档时出错: {self.last_error}")
             return False
 
     def get_stats(self):

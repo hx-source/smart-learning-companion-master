@@ -30,10 +30,6 @@
                         <span class="tab-icon">🔒</span>
                         <span class="tab-text">账号安全</span>
                     </button>
-                    <button class="tab-btn" data-tab="api">
-                        <span class="tab-icon">🔑</span>
-                        <span class="tab-text">API管理</span>
-                    </button>
                 </div>
 
                 <!-- 标签页内容 -->
@@ -106,31 +102,6 @@
                         </div>
                     </div>
 
-                    <!-- API管理 -->
-                    <div class="tab-panel" id="panel-api">
-                        <div class="section-card">
-                            <h3 class="section-title">API密钥配置</h3>
-                            <form id="apiKeysForm" class="profile-form">
-                                <div class="form-group">
-                                    <label>DeepSeek API密钥</label>
-                                    <input type="password" id="deepseekApiKey" placeholder="sk-...">
-                                </div>
-                                <div class="form-group">
-                                    <label>Kimi API密钥</label>
-                                    <input type="password" id="kimiApiKey" placeholder="your-api-key-here">
-                                </div>
-                                <div class="form-group">
-                                    <label>智谱AI API密钥</label>
-                                    <input type="password" id="zhipuApiKey" placeholder="your-api-key-here">
-                                </div>
-                                <div class="form-actions">
-                                    <button type="submit" class="btn btn-primary" id="saveApiBtn">
-                                        <span class="btn-text">保存配置</span>
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
                 </div>
             </div>
         </main>
@@ -155,7 +126,6 @@
         // 页面加载完成后执行
         document.addEventListener('DOMContentLoaded', function() {
             loadUserInfo();
-            loadApiKeys();
         });
 
         // 加载用户信息
@@ -210,27 +180,6 @@
                     avatarBtn.style.backgroundImage = 'none';
                     avatarBtn.querySelector('.avatar-img').textContent = user.username.charAt(0).toUpperCase();
                 }
-            }
-        }
-
-        // 加载API密钥
-        async function loadApiKeys() {
-            try {
-                const token = localStorage.getItem('token');
-                const response = await fetch('/api/auth/api-keys', {
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                const apiKeys = await response.json();
-                if (apiKeys.code === 200) {
-                    document.getElementById('deepseekApiKey').value = apiKeys.deepseek_api_key || '';
-                    document.getElementById('kimiApiKey').value = apiKeys.kimi_api_key || '';
-                    document.getElementById('zhipuApiKey').value = apiKeys.zhipu_api_key || '';
-                }
-            } catch (error) {
-                console.error('加载API密钥配置失败:', error);
             }
         }
 
@@ -401,63 +350,6 @@
             }, 1500);
         });
 
-        // API密钥表单提交
-        document.getElementById('apiKeysForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            const btn = document.getElementById('saveApiBtn');
-            btn.classList.add('loading');
-            btn.querySelector('.btn-text').textContent = '保存中...';
-            btn.disabled = true;
-
-            const data = {
-                deepseek_api_key: document.getElementById('deepseekApiKey').value,
-                kimi_api_key: document.getElementById('kimiApiKey').value,
-                zhipu_api_key: document.getElementById('zhipuApiKey').value
-            };
-
-            try {
-                const token = localStorage.getItem('token');
-                function getCookie(name) {
-                    const value = `; ${document.cookie}`;
-                    const parts = value.split(`; ${name}=`);
-                    if (parts.length === 2) return parts.pop().split(';').shift();
-                }
-                const csrfToken = getCookie('csrf_token');
-                
-                const response = await fetch('/api/auth/api-keys', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`,
-                        'X-CSRF-Token': csrfToken
-                    },
-                    body: JSON.stringify(data)
-                });
-                const result = await response.json();
-                
-                if (result.message === 'API密钥配置已更新') {
-                    btn.querySelector('.btn-text').textContent = '已保存 ✓';
-                    btn.classList.remove('loading');
-                    btn.classList.add('success');
-                } else {
-                    btn.querySelector('.btn-text').textContent = '保存失败';
-                    btn.classList.remove('loading');
-                    btn.classList.add('error');
-                }
-            } catch (error) {
-                btn.querySelector('.btn-text').textContent = '网络错误';
-                btn.classList.remove('loading');
-                btn.classList.add('error');
-            }
-            
-            setTimeout(() => {
-                btn.querySelector('.btn-text').textContent = '保存配置';
-                btn.classList.remove('success', 'error');
-                btn.disabled = false;
-            }, 1500);
-        });
-
         // ESC键关闭模态框
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
@@ -466,7 +358,7 @@
             }
         });
     </script>
-    <script src="/static/js/shared.js"></script>
+    <script src="/static/js/shared.js?v=fix-text-20260612"></script>
     
     <!-- profile.html 专属的初始化代码 -->
     <script>

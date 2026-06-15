@@ -39,6 +39,7 @@ class User(db.Model):
     use_ollama = db.Column(db.Boolean, default=True)
     ollama_model = db.Column(db.String(50), default='qwen2.5:7b')
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    role = db.Column(db.String(20), default='student', nullable=False)
 
     @staticmethod
     def get_by_username(username):
@@ -80,6 +81,14 @@ def update_database_schema():
                     print("is_admin列添加成功!")
                 else:
                     print("is_admin列已存在，无需添加")
+                role_result = conn.execute(db.text("SHOW COLUMNS FROM users LIKE 'role'"))
+                role_column_exists = role_result.fetchone() is not None
+                if not role_column_exists:
+                    print("Adding role column to users table...")
+                    conn.execute(db.text("ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'student'"))
+                    conn.commit()
+                conn.execute(db.text("UPDATE users SET role = 'admin' WHERE is_admin = TRUE AND (role IS NULL OR role <> 'admin')"))
+                conn.commit()
         except Exception as e:
             print(f"更新数据库结构时出错: {e}")
             print("尝试继续执行...")
@@ -107,6 +116,9 @@ def init_admin():
                 admin_user.is_admin = True
                 db.session.commit()
                 print("管理员权限已添加!")
+            if admin_user.role != 'admin':
+                admin_user.role = 'admin'
+                db.session.commit()
             return
         
         # 配置管理员账户信息。
@@ -128,6 +140,7 @@ def init_admin():
             password=hash_password(password),
             email_verified=True,
             is_admin=True,
+            role='admin',
             major='系统管理员',
             grade='管理员'
         )
