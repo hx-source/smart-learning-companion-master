@@ -13,7 +13,7 @@ from sqlalchemy import inspect, text
 from werkzeug.utils import secure_filename
 
 from config import Config
-from app.models import db, User, LearningRecord, ClassKnowledgeBase, UserKnowledgeBase
+from app.models import db, User, LearningRecord, ClassRoom, ClassMember, ClassKnowledgeBase, UserKnowledgeBase
 from app.services.ai_service import AIService
 from app.services.auth_service import AuthService, auth_required, token_required, admin_required, role_required
 from app.services.knowledge_service import QAModule
@@ -79,6 +79,35 @@ def _class_knowledge_base_name(class_name, teacher_id):
     return f'class_{teacher_id}_{_sanitize_knowledge_base_name(class_name)}'
 
 
+def _can_manage_class_room(class_room):
+    if not class_room:
+        return False
+    if request.current_user.has_role('admin'):
+        return True
+    return _current_user_role() == 'teacher' and class_room.teacher_id == request.current_user.id
+
+
+def _is_student_in_class(class_id):
+    if not class_id:
+        return False
+    if request.current_user.has_role('admin'):
+        return True
+    return ClassMember.query.filter_by(class_id=class_id, student_id=request.current_user.id).first() is not None
+
+
+def _ensure_class_room_for_legacy_mapping(mapping):
+    if not mapping or mapping.class_id:
+        return mapping.class_room if mapping else None
+    class_room = ClassRoom.query.filter_by(name=mapping.class_name, teacher_id=mapping.teacher_id).first()
+    if not class_room:
+        class_room = ClassRoom(name=mapping.class_name, teacher_id=mapping.teacher_id, description=mapping.description)
+        db.session.add(class_room)
+        db.session.flush()
+    mapping.class_id = class_room.id
+    db.session.commit()
+    return class_room
+
+
 def _is_class_knowledge_base(knowledge_base):
     if not knowledge_base:
         return False
@@ -118,17 +147,35 @@ def _can_manage_knowledge_base(knowledge_base):
     return True
 
 
+def _can_view_knowledge_base(knowledge_base):
+    if not knowledge_base or knowledge_base == 'default':
+        return False
+    if _can_manage_knowledge_base(knowledge_base):
+        return True
+    mapping = ClassKnowledgeBase.query.filter_by(knowledge_base=knowledge_base).first()
+    if mapping:
+        _ensure_class_room_for_legacy_mapping(mapping)
+        return _is_student_in_class(mapping.class_id)
+    owner = UserKnowledgeBase.query.filter_by(knowledge_base=knowledge_base).first()
+    if owner:
+        return owner.owner_id == request.current_user.id
+    return False
+
+
 def _knowledge_base_item(knowledge_base, class_map=None, owner_map=None):
     class_map = class_map or {}
     owner_map = owner_map or {}
     class_mapping = class_map.get(knowledge_base)
     if class_mapping:
+        class_room = _ensure_class_room_for_legacy_mapping(class_mapping)
         can_manage = _can_manage_knowledge_base(knowledge_base)
         owner_name = class_mapping.teacher.username if class_mapping.teacher else None
         return {
             'name': knowledge_base,
             'display_name': class_mapping.class_name,
             'type': 'class',
+            'class_id': class_mapping.class_id,
+            'class_room_name': class_room.name if class_room else class_mapping.class_name,
             'description': class_mapping.description or '',
             'teacher_id': class_mapping.teacher_id,
             'teacher_name': owner_name,
@@ -206,15 +253,25 @@ def _ensure_runtime_schema():
         inspector = inspect(db.engine)
         if not inspector.has_table('users'):
             return
+        if not inspector.has_table('class_rooms'):
+            ClassRoom.__table__.create(db.engine)
+        if not inspector.has_table('class_members'):
+            ClassMember.__table__.create(db.engine)
         if not inspector.has_table('class_knowledge_bases'):
             ClassKnowledgeBase.__table__.create(db.engine)
         if not inspector.has_table('user_knowledge_bases'):
             UserKnowledgeBase.__table__.create(db.engine)
         user_columns = {column['name'] for column in inspector.get_columns('users')}
+        class_kb_columns = {column['name'] for column in inspector.get_columns('class_knowledge_bases')} if inspector.has_table('class_knowledge_bases') else set()
         with db.engine.begin() as conn:
             if 'role' not in user_columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'student'"))
             conn.execute(text("UPDATE users SET role = 'admin' WHERE is_admin = TRUE AND (role IS NULL OR role <> 'admin')"))
+            if 'class_id' not in class_kb_columns:
+                conn.execute(text("ALTER TABLE class_knowledge_bases ADD COLUMN class_id INT NULL"))
+                conn.execute(text("CREATE INDEX idx_class_knowledge_bases_class_id ON class_knowledge_bases (class_id)"))
+        for mapping in ClassKnowledgeBase.query.filter(ClassKnowledgeBase.class_id.is_(None)).all():
+            _ensure_class_room_for_legacy_mapping(mapping)
     except Exception as exc:
         print(f'Runtime schema check skipped: {exc}')
 
@@ -345,9 +402,110 @@ def admin_delete_user(user_id):
         return jsonify({'code': 404, 'msg': 'user not found'}), 404
     LearningRecord.query.filter_by(user_id=user_id).delete()
     ClassKnowledgeBase.query.filter_by(teacher_id=user_id).delete()
+    ClassMember.query.filter_by(student_id=user_id).delete()
+    teacher_class_ids = [item.id for item in ClassRoom.query.filter_by(teacher_id=user_id).all()]
+    if teacher_class_ids:
+        ClassMember.query.filter(ClassMember.class_id.in_(teacher_class_ids)).delete(synchronize_session=False)
+        ClassRoom.query.filter(ClassRoom.id.in_(teacher_class_ids)).delete(synchronize_session=False)
     db.session.delete(user)
     db.session.commit()
     return jsonify({'code': 200, 'msg': 'deleted'})
+
+
+@app.route('/api/classes', methods=['GET'])
+@token_required
+def list_classes():
+    role = _current_user_role()
+    if request.current_user.has_role('admin'):
+        classes = ClassRoom.query.order_by(ClassRoom.created_at.desc()).all()
+    elif role == 'teacher':
+        classes = ClassRoom.query.filter_by(teacher_id=request.current_user.id).order_by(ClassRoom.created_at.desc()).all()
+    else:
+        memberships = ClassMember.query.filter_by(student_id=request.current_user.id).all()
+        class_ids = [item.class_id for item in memberships]
+        classes = ClassRoom.query.filter(ClassRoom.id.in_(class_ids)).order_by(ClassRoom.created_at.desc()).all() if class_ids else []
+    return jsonify({'code': 200, 'data': [item.to_dict() for item in classes]})
+
+
+@app.route('/api/classes', methods=['POST'])
+@role_required('teacher', 'admin')
+def create_class_room():
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    description = (data.get('description') or '').strip() or None
+    teacher_id = data.get('teacher_id') if request.current_user.has_role('admin') else request.current_user.id
+    if not name:
+        return jsonify({'code': 400, 'msg': 'class name is required'}), 400
+    teacher = User.query.get(teacher_id)
+    if not teacher or not teacher.has_role('teacher', 'admin'):
+        return jsonify({'code': 400, 'msg': 'teacher is invalid'}), 400
+    class_room = ClassRoom(name=name, description=description, teacher_id=teacher.id)
+    db.session.add(class_room)
+    db.session.commit()
+    return jsonify({'code': 200, 'data': class_room.to_dict()})
+
+
+@app.route('/api/classes/<int:class_id>', methods=['DELETE'])
+@role_required('teacher', 'admin')
+def delete_class_room(class_id):
+    class_room = ClassRoom.query.get(class_id)
+    if not class_room:
+        return jsonify({'code': 404, 'msg': 'class not found'}), 404
+    if not _can_manage_class_room(class_room):
+        return jsonify({'code': 403, 'msg': 'Cannot manage this class'}), 403
+    for mapping in ClassKnowledgeBase.query.filter_by(class_id=class_id).all():
+        QAModule(mapping.knowledge_base).delete_knowledge_base()
+        db.session.delete(mapping)
+    ClassMember.query.filter_by(class_id=class_id).delete()
+    db.session.delete(class_room)
+    db.session.commit()
+    return jsonify({'code': 200, 'msg': 'class deleted'})
+
+
+@app.route('/api/classes/<int:class_id>/members', methods=['GET'])
+@role_required('teacher', 'admin')
+def list_class_members(class_id):
+    class_room = ClassRoom.query.get(class_id)
+    if not class_room:
+        return jsonify({'code': 404, 'msg': 'class not found'}), 404
+    if not _can_manage_class_room(class_room):
+        return jsonify({'code': 403, 'msg': 'Cannot manage this class'}), 403
+    members = ClassMember.query.filter_by(class_id=class_id).all()
+    return jsonify({'code': 200, 'data': [item.to_dict() for item in members]})
+
+
+@app.route('/api/classes/<int:class_id>/members', methods=['POST'])
+@role_required('teacher', 'admin')
+def add_class_member(class_id):
+    class_room = ClassRoom.query.get(class_id)
+    if not class_room:
+        return jsonify({'code': 404, 'msg': 'class not found'}), 404
+    if not _can_manage_class_room(class_room):
+        return jsonify({'code': 403, 'msg': 'Cannot manage this class'}), 403
+    data = request.json or {}
+    student_id = data.get('student_id')
+    student = User.query.get(student_id)
+    if not student or (student.role or 'student') != 'student':
+        return jsonify({'code': 400, 'msg': 'student is invalid'}), 400
+    membership = ClassMember.query.filter_by(class_id=class_id, student_id=student.id).first()
+    if not membership:
+        membership = ClassMember(class_id=class_id, student_id=student.id)
+        db.session.add(membership)
+        db.session.commit()
+    return jsonify({'code': 200, 'data': membership.to_dict()})
+
+
+@app.route('/api/classes/<int:class_id>/members/<int:student_id>', methods=['DELETE'])
+@role_required('teacher', 'admin')
+def remove_class_member(class_id, student_id):
+    class_room = ClassRoom.query.get(class_id)
+    if not class_room:
+        return jsonify({'code': 404, 'msg': 'class not found'}), 404
+    if not _can_manage_class_room(class_room):
+        return jsonify({'code': 403, 'msg': 'Cannot manage this class'}), 403
+    ClassMember.query.filter_by(class_id=class_id, student_id=student_id).delete()
+    db.session.commit()
+    return jsonify({'code': 200, 'msg': 'member removed'})
 
 
 @app.route('/api/admin/class-knowledge-bases', methods=['GET'])
@@ -532,11 +690,25 @@ def upload_knowledge_file():
     if class_name:
         if current_role not in {'teacher', 'admin'}:
             return jsonify({'code': 403, 'msg': 'Only teachers and admins can publish class knowledge bases'}), 403
+        class_room = ClassRoom.query.filter_by(name=class_name, teacher_id=request.current_user.id).first()
+        if not class_room:
+            class_room = ClassRoom(name=class_name, teacher_id=request.current_user.id, description=description)
+            db.session.add(class_room)
+            db.session.flush()
         knowledge_base = _class_knowledge_base_name(class_name, request.current_user.id)
         mapping = ClassKnowledgeBase.query.filter_by(knowledge_base=knowledge_base).first()
         if not mapping:
-            mapping = ClassKnowledgeBase(class_name=class_name, knowledge_base=knowledge_base, teacher_id=request.current_user.id, description=description)
+            mapping = ClassKnowledgeBase(
+                class_id=class_room.id,
+                class_name=class_name,
+                knowledge_base=knowledge_base,
+                teacher_id=request.current_user.id,
+                description=description
+            )
             db.session.add(mapping)
+            db.session.commit()
+        elif not mapping.class_id:
+            mapping.class_id = class_room.id
             db.session.commit()
         elif request.current_user.id != mapping.teacher_id and current_role != 'admin':
             return jsonify({'code': 403, 'msg': 'Cannot upload to another teacher class knowledge base'}), 403
@@ -574,6 +746,8 @@ def get_knowledge_base_stats():
     knowledge_base = (request.args.get('knowledge_base') or '').strip()
     if not knowledge_base:
         return jsonify({'code': 400, 'msg': 'knowledge base name is required'}), 400
+    if not _can_view_knowledge_base(knowledge_base):
+        return jsonify({'code': 403, 'msg': 'Cannot view this knowledge base'}), 403
     return jsonify({'code': 200, 'data': QAModule(knowledge_base).get_stats()})
 
 
@@ -636,18 +810,36 @@ def create_knowledge_base():
 @role_required('teacher', 'admin')
 def create_class_knowledge_base():
     data = request.json or {}
+    class_id = data.get('class_id')
     class_name = (data.get('class_name') or '').strip()
     description = (data.get('description') or '').strip() or None
-    if not class_name:
-        return jsonify({'code': 400, 'msg': 'knowledge base deleted'}), 400
-    knowledge_base = _class_knowledge_base_name(class_name, request.current_user.id)
+    class_room = ClassRoom.query.get(class_id) if class_id else None
+    if not class_room and class_name:
+        class_room = ClassRoom(name=class_name, teacher_id=request.current_user.id, description=description)
+        db.session.add(class_room)
+        db.session.flush()
+    if not class_room:
+        return jsonify({'code': 400, 'msg': 'class is required'}), 400
+    if not _can_manage_class_room(class_room):
+        return jsonify({'code': 403, 'msg': 'Cannot publish to this class'}), 403
+    class_name = class_room.name
+    knowledge_base = _class_knowledge_base_name(class_name, class_room.teacher_id)
     mapping = ClassKnowledgeBase.query.filter_by(knowledge_base=knowledge_base).first()
     if not mapping:
-        mapping = ClassKnowledgeBase(class_name=class_name, knowledge_base=knowledge_base, teacher_id=request.current_user.id, description=description)
+        mapping = ClassKnowledgeBase(
+            class_id=class_room.id,
+            class_name=class_name,
+            knowledge_base=knowledge_base,
+            teacher_id=class_room.teacher_id,
+            description=description or class_room.description
+        )
         db.session.add(mapping)
         db.session.commit()
+    elif not mapping.class_id:
+        mapping.class_id = class_room.id
+        db.session.commit()
     QAModule(knowledge_base)
-    return jsonify({'code': 200, 'msg': '????????', 'data': mapping.to_dict()})
+    return jsonify({'code': 200, 'msg': 'class knowledge base created', 'data': mapping.to_dict()})
 
 
 @app.route('/api/knowledge-base/list', methods=['GET'])
@@ -662,7 +854,20 @@ def get_knowledge_base_list():
                 QAModule(kb_name)
     owned_kbs = UserKnowledgeBase.query.all()
     owned_by_name = {item.knowledge_base: item for item in owned_kbs}
-    class_kbs = ClassKnowledgeBase.query.order_by(ClassKnowledgeBase.created_at.desc()).all()
+    all_class_kbs = ClassKnowledgeBase.query.order_by(ClassKnowledgeBase.created_at.desc()).all()
+    for mapping in all_class_kbs:
+        _ensure_class_room_for_legacy_mapping(mapping)
+    role = _current_user_role()
+    if request.current_user.has_role('admin'):
+        class_kbs = all_class_kbs
+    elif role == 'teacher':
+        class_kbs = [item for item in all_class_kbs if item.teacher_id == request.current_user.id]
+    else:
+        member_class_ids = {
+            item.class_id
+            for item in ClassMember.query.filter_by(student_id=request.current_user.id).all()
+        }
+        class_kbs = [item for item in all_class_kbs if item.class_id in member_class_ids]
     class_by_name = {item.knowledge_base: item for item in class_kbs}
     visible = []
     for kb_name in knowledge_bases:
@@ -693,6 +898,8 @@ def get_knowledge_base_vectors():
     knowledge_base = (request.args.get('knowledge_base') or '').strip()
     if not knowledge_base:
         return jsonify({'code': 400, 'msg': 'knowledge base name is required'}), 400
+    if not _can_view_knowledge_base(knowledge_base):
+        return jsonify({'code': 403, 'msg': 'Cannot view this knowledge base'}), 403
     vectors = QAModule(knowledge_base).get_vectors(
         page=request.args.get('page', 1, type=int),
         page_size=request.args.get('page_size', 10, type=int),
@@ -707,6 +914,8 @@ def get_knowledge_base_sources():
     knowledge_base = (request.args.get('knowledge_base') or '').strip()
     if not knowledge_base:
         return jsonify({'code': 400, 'msg': 'knowledge base name is required'}), 400
+    if not _can_view_knowledge_base(knowledge_base):
+        return jsonify({'code': 403, 'msg': 'Cannot view this knowledge base'}), 403
     return jsonify({'code': 200, 'data': QAModule(knowledge_base).get_file_sources()})
 
 
@@ -744,20 +953,23 @@ def _save_learning_record(user_id, question, answer, sources, session_id, model_
 
 
 @app.route('/api/ask-with-kb', methods=['POST'])
+@token_required
 def ask_question_with_kb():
     data = request.json or {}
     question = (data.get('question') or '').strip()
-    user_id = data.get('user_id', 1)
+    user_id = request.current_user.id
     model_type = 'ollama'
     knowledge_base = (data.get('knowledge_base') or '').strip()
     if not question:
         return jsonify({'code': 400, 'msg': 'knowledge base deleted'}), 400
     session_id = data.get('session_id') or str(uuid.uuid4())
-    user = User.get_by_id(user_id)
+    user = request.current_user
     sources = []
     kb_used = False
     model_used = 'unknown'
     if knowledge_base:
+        if not _can_view_knowledge_base(knowledge_base):
+            return jsonify({'code': 403, 'msg': 'Cannot view this knowledge base'}), 403
         kb_result = QAModule(knowledge_base, model_type).query_with_knowledge(question, model_type=model_type, user=user)
         if kb_result['context_used'] and kb_result['sources']:
             answer = kb_result['answer']
@@ -785,10 +997,11 @@ def ask_question_with_kb():
 
 
 @app.route('/api/ask-with-kb/stream', methods=['POST'])
+@token_required
 def ask_question_with_kb_stream():
     data = request.json or {}
     question = (data.get('question') or '').strip()
-    user_id = data.get('user_id', 1)
+    user_id = request.current_user.id
     model_type = 'ollama'
     knowledge_base = (data.get('knowledge_base') or '').strip()
     knowledge_base_enabled = data.get('knowledge_base_enabled', True)
@@ -805,10 +1018,13 @@ def ask_question_with_kb_stream():
         sources = []
         kb_used = False
         model_used = 'unknown'
-        user = User.get_by_id(user_id)
+        user = request.current_user
         try:
             yield send_event({'type': 'start'})
             if knowledge_base_enabled and knowledge_base:
+                if not _can_view_knowledge_base(knowledge_base):
+                    yield send_event({'type': 'error', 'msg': 'Cannot view this knowledge base'})
+                    return
                 yield send_event({'type': 'status', 'content': '正在检索知识库...'})
                 chunk_stream, sources, context_used = QAModule(knowledge_base, model_type).stream_with_knowledge(question, model_type=model_type, user=user)
                 sources = _format_answer_sources(sources, knowledge_base)

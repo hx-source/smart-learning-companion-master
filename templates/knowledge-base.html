@@ -218,6 +218,7 @@
         let knowledgeBases = [];
         let selectedKnowledgeBase = null;
         let selectedSources = [];
+        let classRooms = [];
 
         function getCookie(name) {
             const value = `; ${document.cookie}`;
@@ -241,6 +242,17 @@
 
         function isManageable(kb) {
             return Boolean(kb && kb.can_manage);
+        }
+
+        async function loadClassRooms() {
+            if (!['teacher', 'admin'].includes(CURRENT_USER_ROLE)) return;
+            try {
+                const response = await fetch('/api/classes', { headers: authHeaders() });
+                const data = await response.json();
+                if (data.code === 200) classRooms = data.data || [];
+            } catch (error) {
+                classRooms = [];
+            }
         }
 
         function buildKnowledgeBaseItems(data) {
@@ -362,6 +374,7 @@
 
         function renderCreateForm(type) {
             const isClass = type === 'class';
+            const classOptions = classRooms.map(item => `<option value="${item.id}">${item.name}</option>`).join('');
             document.getElementById('knowledgeBaseDetail').innerHTML = `
                 <div class="kb-detail-head">
                     <div>
@@ -370,9 +383,18 @@
                     </div>
                 </div>
                 <form class="profile-form" id="createKnowledgeForm" style="max-width: 560px;">
+                    ${isClass ? `
                     <div class="form-group">
-                        <label>${isClass ? '班级名称' : '知识库名称'}</label>
-                        <input type="text" id="createKnowledgeName" required placeholder="${isClass ? '例如：高一数学1班' : '例如：我的数学资料'}">
+                        <label>发布到班级</label>
+                        <select id="createClassId">
+                            <option value="">创建新班级</option>
+                            ${classOptions}
+                        </select>
+                    </div>
+                    ` : ''}
+                    <div class="form-group">
+                        <label>${isClass ? '新班级名称' : '知识库名称'}</label>
+                        <input type="text" id="createKnowledgeName" ${isClass && classRooms.length ? '' : 'required'} placeholder="${isClass ? '选择“创建新班级”时填写，例如：高一数学1班' : '例如：我的数学资料'}">
                     </div>
                     ${isClass ? `
                     <div class="form-group">
@@ -389,6 +411,13 @@
             `;
 
             document.getElementById('createKnowledgeName')?.focus();
+            document.getElementById('createClassId')?.addEventListener('change', event => {
+                const nameInput = document.getElementById('createKnowledgeName');
+                if (!nameInput) return;
+                nameInput.required = !event.target.value;
+                nameInput.disabled = Boolean(event.target.value);
+                if (event.target.value) nameInput.value = '';
+            });
             document.getElementById('createKnowledgeForm')?.addEventListener('submit', event => {
                 event.preventDefault();
                 if (isClass) {
@@ -580,15 +609,16 @@
         }
 
         async function submitClassKnowledgeBase() {
+            const classId = document.getElementById('createClassId')?.value;
             const className = normalizeName(document.getElementById('createKnowledgeName')?.value);
-            if (!className) return;
+            if (!classId && !className) return;
             const description = normalizeName(document.getElementById('createKnowledgeDescription')?.value);
 
             try {
                 const response = await fetch('/api/knowledge-base/class/create', {
                     method: 'POST',
                     headers: authHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ class_name: className, description })
+                    body: JSON.stringify({ class_id: classId ? Number(classId) : null, class_name: className, description })
                 });
                 const data = await response.json();
                 if (data.code !== 200) throw new Error(data.msg || data.error || '发布失败');
@@ -673,11 +703,12 @@
             status.className = `kb-status ${type}`;
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             document.getElementById('createPersonalBtn')?.addEventListener('click', showPersonalCreateForm);
             document.getElementById('createClassBtn')?.addEventListener('click', showClassCreateForm);
             document.getElementById('emptyCreatePersonalBtn')?.addEventListener('click', showPersonalCreateForm);
-            loadKnowledgeBases();
+            await loadClassRooms();
+            await loadKnowledgeBases();
         });
     </script>
     <script src="/static/js/shared.js?v=fix-text-20260612"></script>

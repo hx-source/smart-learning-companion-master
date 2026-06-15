@@ -14,6 +14,7 @@
         .admin-form { display: grid; gap: 12px; }
         .admin-form label { display: grid; gap: 6px; font-size: 13px; color: #374151; }
         .admin-form input, .admin-form select { height: 38px; border: 1px solid #d1d5db; border-radius: 6px; padding: 0 10px; }
+        .admin-form textarea { min-height: 64px; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px 10px; resize: vertical; }
         .admin-actions { display: flex; gap: 8px; align-items: center; }
         .admin-table { width: 100%; border-collapse: collapse; font-size: 14px; }
         .admin-table th, .admin-table td { border-bottom: 1px solid #eef2f7; padding: 10px 8px; text-align: left; }
@@ -70,6 +71,32 @@
         </div>
 
         <section class="admin-panel" style="margin-top: 20px;">
+            <div class="admin-actions">
+                <h2 style="flex: 1;">班级管理</h2>
+                <button class="admin-btn secondary" onclick="loadAdminData()">刷新班级</button>
+            </div>
+            <form class="admin-form" id="createClassForm" style="grid-template-columns: 1fr 1fr 1fr auto; align-items: end; margin-bottom: 16px;">
+                <label>班级名称<input id="newClassName" required placeholder="例如：人工智能230582班"></label>
+                <label>负责教师<select id="newClassTeacher"></select></label>
+                <label>说明<input id="newClassDescription" placeholder="可选"></label>
+                <button class="admin-btn" type="submit">创建班级</button>
+            </form>
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>班级</th>
+                        <th>教师</th>
+                        <th>成员</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="classTableBody"></tbody>
+            </table>
+        </section>
+
+        <section class="admin-panel" style="margin-top: 20px;">
             <h2>班级知识库</h2>
             <table class="admin-table">
                 <thead>
@@ -87,6 +114,9 @@
 
     <script>
         const roleLabels = { student: '学生', teacher: '教师', admin: '管理员' };
+        let adminUsers = [];
+        let adminClasses = [];
+        let classMembers = {};
 
         function adminHeaders(json = true) {
             const headers = { Authorization: `Bearer ${localStorage.getItem('token') || getCookie('token')}` };
@@ -99,15 +129,25 @@
         }
 
         async function loadAdminData() {
-            const [usersRes, classKbRes] = await Promise.all([
+            const [usersRes, classesRes, classKbRes] = await Promise.all([
                 fetch('/api/admin/users', { headers: adminHeaders(false) }),
+                fetch('/api/classes', { headers: adminHeaders(false) }),
                 fetch('/api/admin/class-knowledge-bases', { headers: adminHeaders(false) })
             ]);
             const usersData = await usersRes.json();
+            const classesData = await classesRes.json();
             const classKbData = await classKbRes.json();
+            adminUsers = usersData.data || [];
+            adminClasses = classesData.data || [];
+
+            await Promise.all(adminClasses.map(async item => {
+                const res = await fetch(`/api/classes/${item.id}/members`, { headers: adminHeaders(false) });
+                const data = await res.json();
+                classMembers[item.id] = data.data || [];
+            }));
 
             const usersBody = document.getElementById('usersTableBody');
-            usersBody.innerHTML = (usersData.data || []).map(user => `
+            usersBody.innerHTML = adminUsers.map(user => `
                 <tr>
                     <td>${user.id}</td>
                     <td>${escapeHtml(user.username || '')}</td>
@@ -121,6 +161,9 @@
                 </tr>
             `).join('');
 
+            renderTeacherOptions();
+            renderClasses();
+
             const classBody = document.getElementById('classKbTableBody');
             classBody.innerHTML = (classKbData.data || []).map(item => `
                 <tr>
@@ -130,6 +173,46 @@
                     <td>${escapeHtml(item.created_at || '')}</td>
                 </tr>
             `).join('');
+        }
+
+        function renderTeacherOptions() {
+            const select = document.getElementById('newClassTeacher');
+            if (!select) return;
+            const teachers = adminUsers.filter(user => ['teacher', 'admin'].includes(user.role));
+            select.innerHTML = teachers.map(user => `<option value="${user.id}">${escapeHtml(user.username)}（${roleLabels[user.role]}）</option>`).join('');
+        }
+
+        function renderClasses() {
+            const body = document.getElementById('classTableBody');
+            const students = adminUsers.filter(user => user.role === 'student');
+            body.innerHTML = adminClasses.map(item => {
+                const members = classMembers[item.id] || [];
+                const memberNames = members.map(member => escapeHtml(member.student_name || '')).join('、') || '暂无学生';
+                const memberIds = new Set(members.map(member => member.student_id));
+                const studentOptions = students
+                    .filter(student => !memberIds.has(student.id))
+                    .map(student => `<option value="${student.id}">${escapeHtml(student.username)}</option>`)
+                    .join('');
+                return `
+                    <tr>
+                        <td>${item.id}</td>
+                        <td>${escapeHtml(item.name || '')}</td>
+                        <td>${escapeHtml(item.teacher_name || '')}</td>
+                        <td>
+                            <div style="margin-bottom: 8px;">${memberNames}</div>
+                            <div class="admin-actions">
+                                <select id="studentSelect_${item.id}">${studentOptions || '<option value="">无可添加学生</option>'}</select>
+                                <button class="admin-btn secondary" onclick="addClassMember(${item.id})">添加学生</button>
+                            </div>
+                            <div style="margin-top: 8px;">
+                                ${members.map(member => `<button class="admin-btn danger" style="height:28px;margin:2px;" onclick="removeClassMember(${item.id}, ${member.student_id})">${escapeHtml(member.student_name || '')} ×</button>`).join('')}
+                            </div>
+                        </td>
+                        <td>${escapeHtml(item.created_at || '')}</td>
+                        <td><button class="admin-btn danger" onclick="deleteClassRoom(${item.id})">删除班级</button></td>
+                    </tr>
+                `;
+            }).join('');
         }
 
         async function updateUserRole(userId, role) {
@@ -168,7 +251,7 @@
                 body: JSON.stringify(payload)
             });
             const data = await res.json();
-            if (data.code === 201) {
+            if (data.code === 200) {
                 event.target.reset();
                 setAdminStatus('用户已创建');
                 loadAdminData();
@@ -176,6 +259,63 @@
                 setAdminStatus(data.msg || data.error || '创建失败');
             }
         });
+
+        document.getElementById('createClassForm').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const payload = {
+                name: document.getElementById('newClassName').value.trim(),
+                teacher_id: Number(document.getElementById('newClassTeacher').value),
+                description: document.getElementById('newClassDescription').value.trim()
+            };
+            const res = await fetch('/api/classes', {
+                method: 'POST',
+                headers: adminHeaders(),
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.code === 200) {
+                event.target.reset();
+                setAdminStatus('班级已创建');
+                loadAdminData();
+            } else {
+                setAdminStatus(data.msg || data.error || '班级创建失败');
+            }
+        });
+
+        async function addClassMember(classId) {
+            const select = document.getElementById(`studentSelect_${classId}`);
+            const studentId = Number(select?.value);
+            if (!studentId) return;
+            const res = await fetch(`/api/classes/${classId}/members`, {
+                method: 'POST',
+                headers: adminHeaders(),
+                body: JSON.stringify({ student_id: studentId })
+            });
+            const data = await res.json();
+            setAdminStatus(data.code === 200 ? '学生已加入班级' : (data.msg || data.error || '添加失败'));
+            loadAdminData();
+        }
+
+        async function removeClassMember(classId, studentId) {
+            const res = await fetch(`/api/classes/${classId}/members/${studentId}`, {
+                method: 'DELETE',
+                headers: adminHeaders(false)
+            });
+            const data = await res.json();
+            setAdminStatus(data.code === 200 ? '学生已移出班级' : (data.msg || data.error || '移除失败'));
+            loadAdminData();
+        }
+
+        async function deleteClassRoom(classId) {
+            if (!confirm('确定删除这个班级吗？关联的班级知识库也会被删除。')) return;
+            const res = await fetch(`/api/classes/${classId}`, {
+                method: 'DELETE',
+                headers: adminHeaders(false)
+            });
+            const data = await res.json();
+            setAdminStatus(data.code === 200 ? '班级已删除' : (data.msg || data.error || '删除失败'));
+            loadAdminData();
+        }
 
         document.addEventListener('DOMContentLoaded', loadAdminData);
     </script>

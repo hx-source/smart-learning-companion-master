@@ -133,11 +133,62 @@ class LearningRecord(db.Model):
 
 
 
+class ClassRoom(db.Model):
+    """A teaching class/course group managed by a teacher."""
+    __tablename__ = 'class_rooms'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, index=True)
+    description = db.Column(db.String(255), nullable=True)
+    teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    teacher = db.relationship('User', backref=db.backref('class_rooms', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'teacher_id': self.teacher_id,
+            'teacher_name': self.teacher.username if self.teacher else None,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else None
+        }
+
+
+class ClassMember(db.Model):
+    """Student membership in a class."""
+    __tablename__ = 'class_members'
+
+    id = db.Column(db.Integer, primary_key=True)
+    class_id = db.Column(db.Integer, db.ForeignKey('class_rooms.id'), nullable=False, index=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    joined_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    class_room = db.relationship('ClassRoom', backref=db.backref('memberships', lazy='dynamic', cascade='all, delete-orphan'))
+    student = db.relationship('User', backref=db.backref('class_memberships', lazy='dynamic', cascade='all, delete-orphan'))
+
+    __table_args__ = (
+        db.UniqueConstraint('class_id', 'student_id', name='uq_class_member_student'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'class_id': self.class_id,
+            'class_name': self.class_room.name if self.class_room else None,
+            'student_id': self.student_id,
+            'student_name': self.student.username if self.student else None,
+            'joined_at': self.joined_at.strftime('%Y-%m-%d %H:%M') if self.joined_at else None
+        }
+
+
 class ClassKnowledgeBase(db.Model):
     """Knowledge base owned by a teacher and attached to a class."""
     __tablename__ = 'class_knowledge_bases'
 
     id = db.Column(db.Integer, primary_key=True)
+    class_id = db.Column(db.Integer, db.ForeignKey('class_rooms.id'), nullable=True, index=True)
     class_name = db.Column(db.String(100), nullable=False, index=True)
     knowledge_base = db.Column(db.String(100), unique=True, nullable=False)
     teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
@@ -145,10 +196,12 @@ class ClassKnowledgeBase(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     teacher = db.relationship('User', backref=db.backref('class_knowledge_bases', lazy='dynamic'))
+    class_room = db.relationship('ClassRoom', backref=db.backref('knowledge_bases', lazy='dynamic'))
 
     def to_dict(self):
         return {
             'id': self.id,
+            'class_id': self.class_id,
             'class_name': self.class_name,
             'knowledge_base': self.knowledge_base,
             'teacher_id': self.teacher_id,

@@ -657,7 +657,10 @@ async function sendQuestion() {
     try {
         const response = await fetch('/api/ask-with-kb/stream', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('token') || getCookie('token') || ''}`
+            },
             body: JSON.stringify({
                 question: question,
                 user_id: userId,
