@@ -134,14 +134,20 @@
             gap: 10px;
         }
         .kb-file-item {
-            display: flex;
-            justify-content: space-between;
+            display: grid;
+            grid-template-columns: minmax(180px, 1.6fr) repeat(4, minmax(90px, 0.8fr)) auto;
             gap: 12px;
             align-items: center;
             border: 1px solid #e5e7eb;
             border-radius: 8px;
             padding: 12px;
             background: #fff;
+        }
+        .kb-file-head {
+            background: #f9fafb;
+            color: #374151;
+            font-size: 12px;
+            font-weight: 700;
         }
         .kb-file-name {
             font-weight: 650;
@@ -153,6 +159,29 @@
             word-break: break-all;
             margin-top: 4px;
         }
+        .kb-file-cell {
+            min-width: 0;
+            font-size: 13px;
+            color: #374151;
+        }
+        .kb-file-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+        }
+        .doc-status {
+            display: inline-flex;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 12px;
+            font-weight: 700;
+            background: #e5e7eb;
+            color: #374151;
+        }
+        .doc-status.ready { background: #dcfce7; color: #166534; }
+        .doc-status.parsing, .doc-status.pending { background: #dbeafe; color: #1d4ed8; }
+        .doc-status.failed { background: #fee2e2; color: #991b1b; }
         .kb-status {
             min-height: 24px;
             margin-top: 10px;
@@ -173,6 +202,9 @@
             .kb-sidebar { position: static; }
             .kb-detail-head { align-items: flex-start; flex-direction: column; }
             .kb-actions { justify-content: flex-start; }
+            .kb-file-item { grid-template-columns: 1fr; }
+            .kb-file-head { display: none; }
+            .kb-file-actions { justify-content: flex-start; }
         }
     </style>
 </head>
@@ -444,7 +476,7 @@
             selectedSources = [];
             if (!selectedKnowledgeBase) return;
             try {
-                const response = await fetch(`/api/knowledge-base/sources?knowledge_base=${encodeURIComponent(selectedKnowledgeBase.name)}`, {
+                const response = await fetch(`/api/knowledge-base/documents?knowledge_base=${encodeURIComponent(selectedKnowledgeBase.name)}`, {
                     headers: authHeaders()
                 });
                 const data = await response.json();
@@ -533,6 +565,63 @@
                     ${canManage ? `<button class="btn-danger small" onclick="deleteSource('${encodeURIComponent(source.file_path || '')}')">删除</button>` : ''}
                 </div>
             `).join('');
+        }
+
+        function renderFileList() {
+            const container = document.getElementById('fileList');
+            if (!container) return;
+
+            const keyword = normalizeName(document.getElementById('sourceFilter')?.value).toLowerCase();
+            const canManage = isManageable(selectedKnowledgeBase);
+            const sources = selectedSources.filter(source => {
+                const text = `${source.filename || source.file_name || ''} ${source.file_path || ''} ${source.uploader_name || ''}`.toLowerCase();
+                return !keyword || text.includes(keyword);
+            });
+
+            if (!sources.length) {
+                container.innerHTML = '<div class="empty-state">暂无上传文件</div>';
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="kb-file-item kb-file-head">
+                    <div>文件</div>
+                    <div>上传人</div>
+                    <div>上传时间</div>
+                    <div>状态</div>
+                    <div>向量数</div>
+                    <div>操作</div>
+                </div>
+            ` + sources.map(source => `
+                <div class="kb-file-item">
+                    <div>
+                        <div class="kb-file-name">${source.filename || source.file_name || '未知文件'}</div>
+                        <div class="kb-file-path">${source.file_path || ''}</div>
+                    </div>
+                    <div class="kb-file-cell">${source.uploader_name || '-'}</div>
+                    <div class="kb-file-cell">${source.created_at || '-'}</div>
+                    <div class="kb-file-cell">
+                        <span class="doc-status ${source.status || 'ready'}">${documentStatusText(source.status)}</span>
+                        ${source.status === 'failed' && source.parse_error ? `<div class="kb-file-path">${source.parse_error}</div>` : ''}
+                    </div>
+                    <div class="kb-file-cell">${source.vector_count || 0}</div>
+                    <div class="kb-file-actions">
+                        ${canManage && source.id ? `<button class="btn-secondary small" onclick="reparseDocument(${source.id})">重新解析</button>` : ''}
+                        ${canManage && source.id ? `<button class="btn-danger small" onclick="deleteDocument(${source.id})">删除</button>` : ''}
+                        ${canManage && !source.id ? `<button class="btn-danger small" onclick="deleteSource('${encodeURIComponent(source.file_path || '')}')">删除</button>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function documentStatusText(status) {
+            const map = {
+                pending: '等待解析',
+                parsing: '解析中',
+                ready: '解析成功',
+                failed: '解析失败'
+            };
+            return map[status] || '解析成功';
         }
 
         function bindUploadArea() {
@@ -670,6 +759,45 @@
                 await loadKnowledgeBases();
             } catch (error) {
                 alert(`删除失败：${error.message}`);
+            }
+        }
+
+        async function deleteDocument(documentId) {
+            if (!selectedKnowledgeBase || !isManageable(selectedKnowledgeBase)) return;
+            if (!confirm('确定删除这个文件吗？此操作会同时删除对应向量。')) return;
+
+            try {
+                const response = await fetch(`/api/knowledge-base/documents/${documentId}`, {
+                    method: 'DELETE',
+                    headers: authHeaders()
+                });
+                const data = await response.json();
+                if (data.code !== 200) throw new Error(data.msg || data.error || '删除失败');
+                setStatus('文件已删除', 'success');
+                await loadSources();
+                renderFileList();
+            } catch (error) {
+                setStatus(`删除失败：${error.message}`, 'error');
+            }
+        }
+
+        async function reparseDocument(documentId) {
+            if (!selectedKnowledgeBase || !isManageable(selectedKnowledgeBase)) return;
+            setStatus('正在重新解析文件...', 'info');
+            try {
+                const response = await fetch(`/api/knowledge-base/documents/${documentId}/reparse`, {
+                    method: 'POST',
+                    headers: authHeaders()
+                });
+                const data = await response.json();
+                if (data.code !== 200) throw new Error(data.msg || data.error || '重新解析失败');
+                setStatus('文件已重新解析', 'success');
+                await loadSources();
+                renderFileList();
+            } catch (error) {
+                setStatus(`重新解析失败：${error.message}`, 'error');
+                await loadSources();
+                renderFileList();
             }
         }
 

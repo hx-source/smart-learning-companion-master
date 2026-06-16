@@ -313,6 +313,41 @@ class QAModule:
             print(f"添加文档时出错: {self.last_error}")
             return False
 
+    def add_document(self, file_path, metadata=None):
+        """Add a source file and return parse/vector details."""
+        from app.utils.file_processor import FileProcessor
+        from app.utils.text_splitter import TextSplitter
+
+        try:
+            self.last_error = None
+            document_id = (metadata or {}).get('document_id')
+            if document_id:
+                self.delete_by_document_id(document_id)
+            else:
+                self.delete_by_source(file_path)
+
+            processor = FileProcessor()
+            text = processor.process_file(file_path)
+
+            splitter = TextSplitter()
+            chunks = splitter.split_text(text)
+            if not chunks:
+                return {'success': True, 'vector_count': 0}
+
+            metadatas = []
+            for i, chunk in enumerate(chunks):
+                chunk_metadata = metadata.copy() if metadata else {}
+                chunk_metadata['chunk_index'] = i
+                chunk_metadata['file_path'] = file_path
+                metadatas.append(chunk_metadata)
+
+            self.vector_store.add_embeddings(chunks, metadatas=metadatas)
+            return {'success': True, 'vector_count': len(chunks)}
+        except Exception as e:
+            self.last_error = str(e)
+            print(f"Error adding document: {self.last_error}")
+            return {'success': False, 'vector_count': 0, 'error': self.last_error}
+
     def get_stats(self):
         """获取知识库统计信息，供管理页展示向量数量、文档数量和向量维度。"""
         total_vectors = self.vector_store.count()
@@ -361,6 +396,30 @@ class QAModule:
         if self.knowledge_base_name in QAModule._instances:
             del QAModule._instances[self.knowledge_base_name]
         
+        return True
+
+    def clear_knowledge_base(self):
+        """Clear all vectors in this knowledge base."""
+        self.vector_store.clear()
+        return True
+
+    def delete_knowledge_base(self):
+        """Delete vector store, uploaded files, and cached module instance."""
+        self.vector_store.delete_store()
+
+        from flask import current_app
+        uploads_dir = os.path.join(current_app.root_path, current_app.config['DOCUMENT_UPLOAD_FOLDER'], self.knowledge_base_name)
+        if os.path.exists(uploads_dir):
+            try:
+                import shutil
+                shutil.rmtree(uploads_dir)
+                print(f'Deleted knowledge base uploads folder: {uploads_dir}')
+            except Exception as e:
+                print(f'Failed to delete knowledge base uploads folder: {e}')
+
+        if self.knowledge_base_name in QAModule._instances:
+            del QAModule._instances[self.knowledge_base_name]
+
         return True
 
     def rename_knowledge_base(self, new_name):
@@ -544,4 +603,18 @@ class QAModule:
             # 重新加载数据，确保vector_store中的数据是最新的
             self.vector_store._load_data()
         
+        return deleted_count
+
+    def delete_by_document_id(self, document_id):
+        """Delete vectors that belong to one tracked uploaded document."""
+        all_vectors = self.vector_store.get_all_vectors()
+        ids_to_delete = [
+            vector.get('id')
+            for vector in all_vectors
+            if str(vector.get('metadata', {}).get('document_id')) == str(document_id)
+        ]
+        if not ids_to_delete:
+            return 0
+        deleted_count = self.vector_store.delete(ids_to_delete)
+        self.vector_store._load_data()
         return deleted_count

@@ -234,6 +234,49 @@ class UserKnowledgeBase(db.Model):
         }
 
 
+class KnowledgeDocument(db.Model):
+    """Uploaded source document tracked for knowledge base file management."""
+    __tablename__ = 'knowledge_documents'
+
+    id = db.Column(db.Integer, primary_key=True)
+    knowledge_base = db.Column(db.String(100), nullable=False, index=True)
+    filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(255), nullable=False)
+    file_path = db.Column(db.String(500), nullable=False)
+    file_type = db.Column(db.String(20), nullable=False)
+    file_size = db.Column(db.Integer, default=0)
+    uploader_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    uploader_role = db.Column(db.String(20), default='student', nullable=False)
+    status = db.Column(db.String(20), default='pending', nullable=False, index=True)
+    parse_error = db.Column(db.Text, nullable=True)
+    vector_count = db.Column(db.Integer, default=0, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    parsed_at = db.Column(db.DateTime, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    uploader = db.relationship('User', backref=db.backref('knowledge_documents', lazy='dynamic'))
+
+    def to_dict(self, can_manage=False):
+        return {
+            'id': self.id,
+            'knowledge_base': self.knowledge_base,
+            'filename': self.filename,
+            'stored_filename': self.stored_filename,
+            'file_path': self.file_path,
+            'file_type': self.file_type,
+            'file_size': self.file_size,
+            'uploader_id': self.uploader_id,
+            'uploader_name': self.uploader.username if self.uploader else None,
+            'uploader_role': self.uploader_role,
+            'status': self.status,
+            'parse_error': self.parse_error,
+            'vector_count': self.vector_count,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else None,
+            'parsed_at': self.parsed_at.strftime('%Y-%m-%d %H:%M') if self.parsed_at else None,
+            'can_manage': can_manage
+        }
+
+
 class UserLog(db.Model):
     """用户操作日志表。
 

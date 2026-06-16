@@ -13,7 +13,7 @@ from sqlalchemy import inspect, text
 from werkzeug.utils import secure_filename
 
 from config import Config
-from app.models import db, User, LearningRecord, ClassRoom, ClassMember, ClassKnowledgeBase, UserKnowledgeBase
+from app.models import db, User, LearningRecord, ClassRoom, ClassMember, ClassKnowledgeBase, UserKnowledgeBase, KnowledgeDocument
 from app.services.ai_service import AIService
 from app.services.auth_service import AuthService, auth_required, token_required, admin_required, role_required
 from app.services.knowledge_service import QAModule
@@ -261,6 +261,8 @@ def _ensure_runtime_schema():
             ClassKnowledgeBase.__table__.create(db.engine)
         if not inspector.has_table('user_knowledge_bases'):
             UserKnowledgeBase.__table__.create(db.engine)
+        if not inspector.has_table('knowledge_documents'):
+            KnowledgeDocument.__table__.create(db.engine)
         user_columns = {column['name'] for column in inspector.get_columns('users')}
         class_kb_columns = {column['name'] for column in inspector.get_columns('class_knowledge_bases')} if inspector.has_table('class_knowledge_bases') else set()
         with db.engine.begin() as conn:
@@ -401,6 +403,7 @@ def admin_delete_user(user_id):
     if not user:
         return jsonify({'code': 404, 'msg': 'user not found'}), 404
     LearningRecord.query.filter_by(user_id=user_id).delete()
+    KnowledgeDocument.query.filter_by(uploader_id=user_id).update({'uploader_id': request.current_user.id})
     ClassKnowledgeBase.query.filter_by(teacher_id=user_id).delete()
     ClassMember.query.filter_by(student_id=user_id).delete()
     teacher_class_ids = [item.id for item in ClassRoom.query.filter_by(teacher_id=user_id).all()]
@@ -455,6 +458,7 @@ def delete_class_room(class_id):
         return jsonify({'code': 403, 'msg': 'Cannot manage this class'}), 403
     for mapping in ClassKnowledgeBase.query.filter_by(class_id=class_id).all():
         QAModule(mapping.knowledge_base).delete_knowledge_base()
+        KnowledgeDocument.query.filter_by(knowledge_base=mapping.knowledge_base).delete()
         db.session.delete(mapping)
     ClassMember.query.filter_by(class_id=class_id).delete()
     db.session.delete(class_room)
@@ -725,19 +729,44 @@ def upload_knowledge_file():
     saved_filename = _safe_upload_filename(file.filename)
     filename = os.path.join(upload_dir, saved_filename)
     file.save(filename)
+    document = KnowledgeDocument(
+        knowledge_base=knowledge_base,
+        filename=file.filename,
+        stored_filename=saved_filename,
+        file_path=filename,
+        file_type=file_ext.lstrip('.'),
+        file_size=os.path.getsize(filename),
+        uploader_id=request.current_user.id,
+        uploader_role=current_role,
+        status='parsing'
+    )
+    db.session.add(document)
+    db.session.commit()
     kb_instance = QAModule(knowledge_base)
-    success = kb_instance.add_document(filename, metadata={
+    result = kb_instance.add_document(filename, metadata={
+        'document_id': document.id,
+        'file_name': file.filename,
         'uploaded_by': request.current_user.id,
         'uploader_role': current_role,
         'class_name': class_name,
         'knowledge_base': knowledge_base
     })
+    success = result.get('success') if isinstance(result, dict) else bool(result)
     if not success:
+        document.status = 'failed'
+        document.parse_error = (result.get('error') if isinstance(result, dict) else None) or getattr(kb_instance, 'last_error', '') or 'unknown error'
+        document.vector_count = 0
+        db.session.commit()
         detail = getattr(kb_instance, 'last_error', '') or '未知错误'
         if 'No module named' in detail and 'docx' in detail:
             detail = '服务器缺少 python-docx 依赖，无法解析 Word 文档。请执行 pip install python-docx 后重启服务。'
         return jsonify({'code': 500, 'msg': f'添加文件到知识库失败：{detail}'}), 500
-    return jsonify({'code': 200, 'msg': 'file added to knowledge base', 'data': {'filename': saved_filename, 'knowledge_base': knowledge_base}})
+    document.status = 'ready'
+    document.parse_error = None
+    document.vector_count = result.get('vector_count', 0) if isinstance(result, dict) else 0
+    document.parsed_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'code': 200, 'msg': 'file added to knowledge base', 'data': document.to_dict(can_manage=True)})
 
 
 @app.route('/api/knowledge-base/stats', methods=['GET'])
@@ -762,6 +791,7 @@ def delete_knowledge_base():
     QAModule(knowledge_base).delete_knowledge_base()
     ClassKnowledgeBase.query.filter_by(knowledge_base=knowledge_base).delete()
     UserKnowledgeBase.query.filter_by(knowledge_base=knowledge_base).delete()
+    KnowledgeDocument.query.filter_by(knowledge_base=knowledge_base).delete()
     db.session.commit()
     return jsonify({'code': 200, 'msg': 'knowledge base deleted'})
 
@@ -786,6 +816,7 @@ def rename_knowledge_base():
     user_mapping = UserKnowledgeBase.query.filter_by(knowledge_base=old_name).first()
     if user_mapping:
         user_mapping.knowledge_base = new_name
+    KnowledgeDocument.query.filter_by(knowledge_base=old_name).update({'knowledge_base': new_name})
     db.session.commit()
     return jsonify({'code': 200, 'msg': 'knowledge base renamed'})
 
@@ -919,6 +950,79 @@ def get_knowledge_base_sources():
     return jsonify({'code': 200, 'data': QAModule(knowledge_base).get_file_sources()})
 
 
+@app.route('/api/knowledge-base/documents', methods=['GET'])
+@token_required
+def get_knowledge_base_documents():
+    knowledge_base = (request.args.get('knowledge_base') or '').strip()
+    if not knowledge_base:
+        return jsonify({'code': 400, 'msg': 'knowledge base name is required'}), 400
+    if not _can_view_knowledge_base(knowledge_base):
+        return jsonify({'code': 403, 'msg': 'Cannot view this knowledge base'}), 403
+    can_manage = _can_manage_knowledge_base(knowledge_base)
+    documents = KnowledgeDocument.query.filter_by(knowledge_base=knowledge_base).order_by(KnowledgeDocument.created_at.desc()).all()
+    return jsonify({'code': 200, 'data': [item.to_dict(can_manage=can_manage) for item in documents]})
+
+
+@app.route('/api/knowledge-base/documents/<int:document_id>', methods=['DELETE'])
+@token_required
+def delete_knowledge_document(document_id):
+    document = KnowledgeDocument.query.get(document_id)
+    if not document:
+        return jsonify({'code': 404, 'msg': 'document not found'}), 404
+    if not _can_manage_knowledge_base(document.knowledge_base):
+        return jsonify({'code': 403, 'msg': 'Cannot delete this document'}), 403
+    deleted_count = QAModule(document.knowledge_base).delete_by_document_id(document.id)
+    if os.path.exists(document.file_path):
+        try:
+            os.remove(document.file_path)
+        except OSError as exc:
+            return jsonify({'code': 500, 'msg': f'failed to delete source file: {exc}'}), 500
+    db.session.delete(document)
+    db.session.commit()
+    return jsonify({'code': 200, 'msg': 'document deleted', 'data': {'deleted_count': deleted_count}})
+
+
+@app.route('/api/knowledge-base/documents/<int:document_id>/reparse', methods=['POST'])
+@token_required
+def reparse_knowledge_document(document_id):
+    document = KnowledgeDocument.query.get(document_id)
+    if not document:
+        return jsonify({'code': 404, 'msg': 'document not found'}), 404
+    if not _can_manage_knowledge_base(document.knowledge_base):
+        return jsonify({'code': 403, 'msg': 'Cannot reparse this document'}), 403
+    if not os.path.exists(document.file_path):
+        document.status = 'failed'
+        document.parse_error = 'source file not found'
+        document.vector_count = 0
+        db.session.commit()
+        return jsonify({'code': 404, 'msg': 'source file not found'}), 404
+
+    document.status = 'parsing'
+    document.parse_error = None
+    db.session.commit()
+    kb_instance = QAModule(document.knowledge_base)
+    result = kb_instance.add_document(document.file_path, metadata={
+        'document_id': document.id,
+        'file_name': document.filename,
+        'uploaded_by': document.uploader_id,
+        'uploader_role': document.uploader_role,
+        'knowledge_base': document.knowledge_base
+    })
+    success = result.get('success') if isinstance(result, dict) else bool(result)
+    if not success:
+        document.status = 'failed'
+        document.parse_error = (result.get('error') if isinstance(result, dict) else None) or getattr(kb_instance, 'last_error', '') or 'unknown error'
+        document.vector_count = 0
+        db.session.commit()
+        return jsonify({'code': 500, 'msg': document.parse_error, 'data': document.to_dict(can_manage=True)}), 500
+    document.status = 'ready'
+    document.parse_error = None
+    document.vector_count = result.get('vector_count', 0) if isinstance(result, dict) else 0
+    document.parsed_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'code': 200, 'msg': 'document reparsed', 'data': document.to_dict(can_manage=True)})
+
+
 @app.route('/api/knowledge-base/sources/<path:file_path>', methods=['DELETE'])
 @token_required
 def delete_knowledge_base_source(file_path):
@@ -933,6 +1037,9 @@ def delete_knowledge_base_source(file_path):
     upload_file = os.path.join(app.root_path, app.config['DOCUMENT_UPLOAD_FOLDER'], knowledge_base, os.path.basename(file_path))
     if os.path.exists(upload_file):
         os.remove(upload_file)
+    KnowledgeDocument.query.filter_by(knowledge_base=knowledge_base, file_path=file_path).delete()
+    KnowledgeDocument.query.filter_by(knowledge_base=knowledge_base, stored_filename=os.path.basename(file_path)).delete()
+    db.session.commit()
     return jsonify({'code': 200, 'msg': f'???? {deleted_count} ???', 'data': {'deleted_count': deleted_count}})
 
 
