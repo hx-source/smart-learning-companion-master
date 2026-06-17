@@ -36,7 +36,12 @@
         .status-pill.pending, .status-pill.parsing { background: #dbeafe; color: #1d4ed8; }
         .status-pill.failed, .status-pill.rejected { background: #fee2e2; color: #991b1b; }
         .batch-box { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin: 10px 0; }
-        .batch-list { min-height: 88px; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px; }
+        .batch-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+        .batch-list { min-height: 88px; max-height: 220px; overflow: auto; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px; background: #fff; }
+        .batch-option { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-radius: 4px; }
+        .batch-option:hover { background: #f3f4f6; }
+        .batch-option input { width: 16px; height: 16px; }
+        .batch-empty { color: #6b7280; font-size: 13px; padding: 6px 4px; }
         @media (max-width: 860px) { .admin-grid { grid-template-columns: 1fr; } }
         @media (max-width: 860px) { .admin-detail-grid, .batch-box { grid-template-columns: 1fr; } }
     </style>
@@ -307,11 +312,21 @@
                 </div>
                 <h3>批量添加学生</h3>
                 <div class="batch-box">
-                    <label>可添加学生
-                        <select id="batchStudentSelect" class="batch-list" multiple>
-                            ${detailCache.availableStudents.map(student => `<option value="${student.id}">${escapeHtml(student.username || '')} ${student.email ? `(${escapeHtml(student.email)})` : ''}</option>`).join('')}
-                        </select>
-                    </label>
+                    <div>
+                        <div class="admin-muted">可添加学生</div>
+                        <div class="batch-toolbar">
+                            <button class="admin-btn secondary" type="button" onclick="setBatchStudentChecks(true)">全选</button>
+                            <button class="admin-btn secondary" type="button" onclick="setBatchStudentChecks(false)">取消全选</button>
+                        </div>
+                        <div id="batchStudentList" class="batch-list">
+                            ${detailCache.availableStudents.length ? detailCache.availableStudents.map(student => `
+                                <label class="batch-option">
+                                    <input type="checkbox" class="batch-student-check" value="${student.id}">
+                                    <span>${escapeHtml(student.username || '')} ${student.email ? `(${escapeHtml(student.email)})` : ''}</span>
+                                </label>
+                            `).join('') : '<div class="batch-empty">暂无可添加学生</div>'}
+                        </div>
+                    </div>
                     <button class="admin-btn" onclick="addClassMembersBatch(${info.id})">批量添加</button>
                 </div>
                 <h3>学生成员</h3>
@@ -455,8 +470,7 @@
         }
 
         async function addClassMembersBatch(classId) {
-            const select = document.getElementById('batchStudentSelect');
-            const studentIds = Array.from(select?.selectedOptions || []).map(option => Number(option.value)).filter(Boolean);
+            const studentIds = Array.from(document.querySelectorAll('.batch-student-check:checked')).map(input => Number(input.value)).filter(Boolean);
             if (!studentIds.length) {
                 setAdminStatus('请选择要添加的学生');
                 return;
@@ -473,6 +487,12 @@
             } else {
                 setAdminStatus(data.msg || data.error || '批量添加失败');
             }
+        }
+
+        function setBatchStudentChecks(checked) {
+            document.querySelectorAll('.batch-student-check').forEach(input => {
+                input.checked = checked;
+            });
         }
 
         async function reviewJoinRequest(requestId, status) {
