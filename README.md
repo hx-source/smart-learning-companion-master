@@ -126,6 +126,30 @@ knowledge_documents     知识库文件表，记录上传人、解析状态和�
 
 如果 Ollama 嵌入接口暂时不可用，向量模块会使用本地 fallback 嵌入，保证基础流程不直接崩溃；但正式问答建议保证 Ollama 服务和模型可用。
 
+### 专业重排调用
+
+默认重排后端仍可使用 Ollama 模拟打分：
+
+```env
+RERANKER_BACKEND=ollama
+OLLAMA_RERANKER_MODEL=qllama/bge-reranker-large:latest
+```
+
+如果要使用更专业的本地 Cross-Encoder 调用方式，可以安装 `FlagEmbedding` 并把 reranker 模型放到本地目录：
+
+```bash
+pip install FlagEmbedding torch
+```
+
+```env
+USE_RERANKER=true
+RERANKER_BACKEND=flagembedding
+RERANKER_MODEL_PATH=./models/bge-reranker-large
+RERANKER_USE_FP16=true
+```
+
+这种方式会直接调用 reranker 模型计算 `[问题, 文档片段]` 的相关性分数，而不是让 Ollama 生成一个分数。只有使用 `flagembedding` 后端时，reranker 模型需要放到本地目录；生成模型和嵌入模型如果仍通过 Ollama 调用，不需要放进 `models/` 目录，只要 `ollama list` 能看到即可。
+
 示例模型配置见 `.env.example`：
 
 ```env

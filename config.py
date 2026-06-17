@@ -35,6 +35,9 @@ class Config:
     OLLAMA_RERANKER_MODEL = os.getenv('OLLAMA_RERANKER_MODEL', 'qwen2.5:7b')  # 重排模型
     USE_OLLAMA = os.getenv('USE_OLLAMA', 'true').lower() == 'true'
     USE_RERANKER = os.getenv('USE_RERANKER', 'true').lower() == 'true'  # 是否启用重排
+    RERANKER_BACKEND = os.getenv('RERANKER_BACKEND', 'ollama').lower()  # ollama 或 flagembedding
+    RERANKER_MODEL_PATH = os.getenv('RERANKER_MODEL_PATH', '')  # FlagEmbedding 本地 reranker 模型目录
+    RERANKER_USE_FP16 = os.getenv('RERANKER_USE_FP16', 'true').lower() == 'true'
 
 
 
