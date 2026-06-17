@@ -1,13 +1,16 @@
+"""重排服务模块。
+
+向量搜索先快速召回候选片段，重排再用更“贵”但更细的相关性判断重新排序。
+优先使用 FlagEmbedding 直接调用本地 Cross-Encoder reranker 打分；
+未安装依赖或模型路径不可用时，自动降级到 Ollama 生成式打分。
 """
-重排服务模块
-使用 Cross-Encoder 模型对召回的文档进行重排序
-"""
+import os
 import requests
 from config import Config
 
 
 class RerankerService:
-    """重排服务"""
+    """检索结果重排服务。"""
     _initialized = False
     
     def __init__(self, model_name=None):
@@ -16,14 +19,26 @@ class RerankerService:
         Args:
             model_name: 重排模型名称
         """
-        self.model_name = model_name or Config.OLLAMA_RERANKER_MODEL
+        self.backend = Config.RERANKER_BACKEND
+        self.model_name = model_name or Config.RERANKER_MODEL_PATH or Config.OLLAMA_RERANKER_MODEL
+        self.ollama_model_name = model_name or Config.OLLAMA_RERANKER_MODEL
         self.ollama_url = Config.OLLAMA_BASE_URL
         self.use_reranker = True
+        self.flag_reranker = None
         
         if not RerankerService._initialized:
+            print(f"重排后端：{self.backend}")
             print(f"重排模型：{self.model_name}")
         
-        # 测试连接
+        if self.backend == 'flagembedding':
+            self._init_flagembedding_backend()
+
+        if self.flag_reranker:
+            RerankerService._initialized = True
+            return
+
+        # FlagEmbedding 不可用或未启用时，降级到 Ollama 模拟打分。
+        self.backend = 'ollama'
         try:
             response = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
             if response.status_code != 200:
@@ -34,6 +49,28 @@ class RerankerService:
             self.use_reranker = False
         
         RerankerService._initialized = True
+
+    def _init_flagembedding_backend(self):
+        """Load a local FlagEmbedding reranker if configured and available."""
+        model_path = Config.RERANKER_MODEL_PATH or self.model_name
+        if not model_path:
+            print("未配置 RERANKER_MODEL_PATH，重排降级到 Ollama")
+            return
+        if os.path.sep in model_path or model_path.startswith('.'):
+            abs_model_path = os.path.abspath(model_path)
+            if not os.path.isdir(abs_model_path):
+                print(f"本地重排模型目录不存在：{abs_model_path}，重排降级到 Ollama")
+                return
+            model_path = abs_model_path
+
+        try:
+            from FlagEmbedding import FlagReranker
+            self.flag_reranker = FlagReranker(model_path, use_fp16=Config.RERANKER_USE_FP16)
+            self.model_name = model_path
+            print(f"已启用 FlagEmbedding 重排：{model_path}")
+        except Exception as exc:
+            self.flag_reranker = None
+            print(f"FlagEmbedding 重排初始化失败：{exc}，重排降级到 Ollama")
     
     def rerank(self, query, documents, top_k=None):
         """对文档进行重排序
@@ -54,10 +91,10 @@ class RerankerService:
             ][:top_k or len(documents)]
         
         try:
-            # 调用 Ollama 的重排 API
-            # 注意：Ollama 本身不直接支持重排 API，这里使用模拟的 Cross-Encoder 方式
-            # 实际部署时需要使用支持重排的模型或服务
-            scores = self._compute_similarity_scores(query, documents)
+            if self.flag_reranker:
+                scores = self._compute_flagembedding_scores(query, documents)
+            else:
+                scores = self._compute_ollama_similarity_scores(query, documents)
             
             # 构建结果
             results = []
@@ -68,7 +105,7 @@ class RerankerService:
                     'index': i
                 })
             
-            # 按分数降序排序
+            # 按分数降序排序，分数越高表示模型认为越相关。
             results.sort(key=lambda x: x['score'], reverse=True)
             
             # 返回 top_k 个结果
@@ -84,23 +121,25 @@ class RerankerService:
                 for i, doc in enumerate(documents)
             ][:top_k or len(documents)]
     
-    def _compute_similarity_scores(self, query, documents):
-        """计算查询与文档的相似度分数
-        
-        使用 Cross-Encoder 方式计算语义相似度
-        
-        Args:
-            query: 查询文本
-            documents: 文档列表
-            
-        Returns:
-            list: 相似度分数列表
-        """
+    def _compute_flagembedding_scores(self, query, documents):
+        """Compute relevance scores with a real local Cross-Encoder reranker."""
+        pairs = [[query, doc] for doc in documents]
+        scores = self.flag_reranker.compute_score(pairs)
+        if not isinstance(scores, list):
+            try:
+                scores = scores.tolist()
+            except AttributeError:
+                scores = [scores]
+        return [float(score) for score in scores]
+
+    def _compute_ollama_similarity_scores(self, query, documents):
+        """Fallback: ask an Ollama generation model to output relevance scores."""
         scores = []
         
         for doc in documents:
             try:
-                # 构建提示词，让模型评估相关性
+                # 构建提示词，让模型评估相关性。
+                # 文档截断到 500 字，避免重排阶段耗时过长。
                 prompt = f"""请评估以下查询与文档的相关性，返回 0-1 之间的分数：
                 
 查询：{query}
@@ -113,7 +152,7 @@ class RerankerService:
                 response = requests.post(
                     f"{self.ollama_url}/api/generate",
                     json={
-                        "model": self.model_name,
+                        "model": self.ollama_model_name,
                         "prompt": prompt,
                         "stream": False,
                         "options": {
@@ -128,7 +167,7 @@ class RerankerService:
                     result = response.json()
                     score_text = result.get('response', '').strip()
                     
-                    # 解析分数
+                    # 解析分数：模型可能返回“0.8”或带解释的文本，因此用正则抽取数字。
                     try:
                         # 提取数字
                         import re
@@ -181,7 +220,7 @@ class RerankerService:
         reranked_ids = []
         
         for result in reranked_results:
-            # 找到原始索引
+            # 找到原始索引，用它同步取回文档、元数据、距离和 ID。
             original_index = result['index']
             
             reranked_documents.append(documents[original_index])

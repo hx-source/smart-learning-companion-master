@@ -1,102 +1,184 @@
 # 智学伴 AI 个性化学习伴侣系统
 
-这是一个基于 Flask 的智能学习助手项目，集成了用户认证、知识库管理、文档处理、向量检索和本地/远程模型调用。
+这是一个基于 Flask 的本地智能学习助手项目。系统支持用户认证、多角色权限、管理员后台、个人/班级知识库、文档上传解析、向量检索、知识库问答、来源展示和学习记录管理。
+
+当前版本已移除云端 API 问答路径，问答与知识库能力统一走本地 Ollama。
 
 ## 核心功能
 
-- 用户注册 / 登录 / 注销
-- 邮箱验证码注册与密码重置
-- 账户锁定与登录安全策略
-- 用户 API 密钥管理
-- 用户资料与头像上传
-- 文档上传与知识库管理
-- 文档格式支持：PDF、TXT、DOCX
-- OCR 文本提取（PaddleOCR + PyMuPDF）
-- 文本分块与向量化
-- 向量检索：Faiss 本地向量索引
-- 语义问答：RAG 流程 + Ollama / DeepSeek / 自定义模型
-- 学习记录保存与会话历史
+- 用户注册、登录、注销、密码重置
+- 多角色权限：学生、教师、管理员
+- 管理员后台：用户创建、删除、角色修改、班级知识库查看
+- 班级管理：创建班级、分配教师、添加/移除学生
+- 班级详情：成员列表、批量添加学生、加入申请审批、成员变更记录、知识库绑定状态
+- 学生可在“我的班级”中申请加入班级、撤销申请或退出已加入班级
+- 学生端不显示后台入口，不能自行切换角色
+- 独立知识库页面：`/knowledge-base`
+- 学生可创建和维护自己的个人知识库
+- 教师可创建个人知识库，也可发布班级知识库
+- 学生只可读取自己所在班级的班级知识库并用于问答，不能修改老师发布的文件
+- 管理员可管理用户、角色和知识库文件
+- 支持 PDF、TXT、DOCX 上传
+- 知识库文件管理：上传人、上传时间、解析状态、向量数量、重新解析
+- PDF 支持文本提取，扫描类 PDF 可通过 OCR 兜底
+- DOCX 支持段落和表格文本提取
+- Faiss 本地向量库持久化
+- 本地 Ollama 生成模型、嵌入模型和可选重排模型
+- 问答支持流式输出和阶段状态提示
+- 知识库回答展示来源：文件名、片段、所属知识库
+- 学习记录和会话历史保存
+
+## 角色与权限
+
+| 角色 | 后台入口 | 个人知识库 | 班级知识库 | 用户管理 |
+| --- | --- | --- | --- | --- |
+| 学生 | 不显示、不可访问 | 可创建、上传、删除自己的文件 | 可查看和问答老师发布的班级知识库，不可修改 | 无 |
+| 教师 | 不显示管理员后台 | 可创建和维护 | 可发布班级知识库并上传班级资料 | 无 |
+| 管理员 | 可访问 `/admin` | 可管理 | 可查看和管理全部班级知识库 | 可创建用户、删除用户、修改角色、维护班级成员 |
+
+角色只能由管理员修改，普通用户不能在前端随意切换权限。
+
+## 知识库逻辑
+
+### 个人知识库
+
+个人知识库归创建者所有。
+
+- 学生创建的知识库只属于该学生。
+- 教师也可以创建自己的个人知识库。
+- 创建者和管理员可以上传、删除、重命名。
+- 其他普通用户不可修改。
+
+### 班级与班级知识库
+
+班级知识库由教师或管理员发布，并绑定到一个真实班级。
+
+- 管理员可在后台创建班级、分配负责教师、添加或移除学生。
+- 教师可进入后台管理自己负责的班级，不能查看或审批其他教师的班级。
+- 教师可发布知识库到指定班级，并审批学生加入申请。
+- 学生加入班级后，首页知识库下拉框才会显示该班级的知识库。
+- 学生只能读取和问答自己所在班级的知识库，不能上传、删除或重命名老师发布的知识库。
+- 学生可在 `/my-classes` 查看可申请班级、提交申请、撤销待审批申请或退出已加入班级。
+- 发布教师和管理员可以维护其中的文件。
+
+当前涉及五张表：
+
+```text
+class_rooms             班级/课程表
+class_members           班级成员表，记录学生加入了哪些班级
+class_join_requests     学生加入班级申请表，记录待审批、同意、拒绝、撤销
+class_member_logs       班级成员变更日志，记录加入、退出、移除、申请通过
+class_knowledge_bases   班级知识库表，记录知识库发布到哪个班级
+knowledge_documents     知识库文件表，记录上传人、解析状态和向量数量
+```
+
+班级知识库绑定状态会根据该班级的知识库和文件解析情况自动计算：
+
+- `未发布`：班级还没有绑定班级知识库。
+- `已发布未上传`：已创建班级知识库，但没有上传文件。
+- `解析中`：存在等待解析或正在解析的文件。
+- `部分失败`：有成功文件，也有解析失败文件。
+- `解析失败`：全部文件解析失败。
+- `可用`：存在解析成功文件，并且向量数量大于 0。
+
+### 知识库文件管理
+
+知识库页面会展示每个上传文件的管理信息：
+
+- 文件名、原始路径、上传人、上传时间。
+- 解析状态：等待解析、解析中、解析成功、解析失败。
+- 向量数量：该文件切分后写入 Faiss 的片段数量。
+- 解析失败时保留错误原因，方便定位 DOCX/PDF/嵌入模型问题。
+- 管理员、个人知识库创建者、班级知识库发布教师可以删除文件或重新解析。
+- 学生访问老师发布的班级知识库时只读，不显示删除和重新解析操作。
+
+重新解析会先删除该文件旧的向量，再使用原文件重新提取文本、切分并写入新向量。每个向量片段的元数据都会记录 `document_id`，因此可以精确定位到某一个上传文件。
+
+### 首页知识库开关
+
+- 开启：提问时优先检索当前选择的知识库；命中后使用 RAG 回答并展示来源。
+- 关闭：不检索知识库，直接使用本地 Ollama 模型回答。
+- 不再依赖 `default` 知识库作为默认问答入口。
+
+## RAG 流程
+
+1. 用户在知识库页面上传 PDF、TXT 或 DOCX。
+2. 系统创建 `KnowledgeDocument` 记录，并标记为解析中。
+3. `FileProcessor` 提取文本。
+4. `TextSplitter` 将文本切成片段。
+5. `EmbeddingModel` 调用 Ollama 嵌入模型生成向量。
+6. `VectorStore` 使用 LangChain FAISS 保存向量、文本和元数据。
+7. 解析成功后写入向量数量和解析完成时间，失败则记录错误原因。
+8. 用户提问时，系统检索相关片段。
+9. 如果启用重排，则使用本地重排模型重新排序片段。
+10. `QAModule` 将检索上下文和问题组合为提示词。
+11. 本地 Ollama 生成回答。
+12. 前端展示回答、命中文件、片段来源、所属知识库。
+13. 学习记录保存问题、回答、来源、会话 ID 和使用的知识库。
+
+## 本地模型说明
+
+项目统一使用本地 Ollama：
+
+- 生成模型：`OLLAMA_MODEL`
+- 嵌入模型：`OLLAMA_EMBEDDING_MODEL`
+- 重排模型：`OLLAMA_RERANKER_MODEL`
+
+如果 Ollama 嵌入接口暂时不可用，向量模块会使用本地 fallback 嵌入，保证基础流程不直接崩溃；但正式问答建议保证 Ollama 服务和模型可用。
+
+### 专业重排调用
+
+默认重排后端仍可使用 Ollama 模拟打分：
+
+```env
+RERANKER_BACKEND=ollama
+OLLAMA_RERANKER_MODEL=qllama/bge-reranker-large:latest
+```
+
+如果要使用更专业的本地 Cross-Encoder 调用方式，可以安装 `FlagEmbedding` 并把 reranker 模型放到本地目录：
+
+```bash
+pip install FlagEmbedding torch
+```
+
+```env
+USE_RERANKER=true
+RERANKER_BACKEND=flagembedding
+RERANKER_MODEL_PATH=./models/bge-reranker-large
+RERANKER_USE_FP16=true
+```
+
+这种方式会直接调用 reranker 模型计算 `[问题, 文档片段]` 的相关性分数，而不是让 Ollama 生成一个分数。只有使用 `flagembedding` 后端时，reranker 模型需要放到本地目录；生成模型和嵌入模型如果仍通过 Ollama 调用，不需要放进 `models/` 目录，只要 `ollama list` 能看到即可。
+
+示例模型配置见 `.env.example`：
+
+```env
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:7b
+OLLAMA_EMBEDDING_MODEL=bge-m3
+OLLAMA_RERANKER_MODEL=qwen2.5:7b
+USE_OLLAMA=true
+USE_RERANKER=true
+```
 
 ## 项目结构
 
-- `app.py` - Flask 应用主入口与页面/API 路由
-- `run.py` - 启动脚本，负责初始化数据库并启动服务
-- `config.py` - 应用配置与环境变量读取
-- `app/` - 应用模块
-  - `models/` - 数据库模型
-  - `routes/` - Blueprint 路由
-  - `services/` - 业务逻辑服务
-  - `utils/` - 文档处理、文本拆分、向量服务
-- `requirements.txt` - Python 依赖
-- `templates/` - 前端 HTML 模板
-- `static/` - 静态资源
-- `uploads/` - 上传文档目录（运行时自动创建）
+```text
+app.py                         Flask 主入口，页面路由和 API 路由
+run.py                         启动脚本，检查数据库并启动服务
+config.py                      配置读取
+init_admin.py                  初始化默认管理员
+app/models/                    数据库模型
+app/routes/                    认证相关蓝图
+app/services/                  AI、认证、知识库服务
+app/utils/                     文件解析、文本切分、向量服务、兼容补丁
+templates/                     页面模板
+static/                        CSS / JS / 静态资源
+uploads/                       运行时上传目录，已忽略提交
+knowledge_base_*_langchain_faiss/ 运行时向量库目录，已忽略提交
+```
 
-## 主要实现功能
-
-### 1. 用户认证与安全
-
-- 注册时发送邮箱验证码
-- 邮箱验证码验证、密码设置、账户激活
-- 登录支持用户名或邮箱
-- 登录失败次数限制与锁定策略
-- JWT Token 与 CSRF 保护
-- 密码重置与密码修改
-- 登录、注册、重置、登出等操作日志记录
-
-### 2. 知识库管理
-
-- 创建/删除/重命名知识库
-- 浏览知识库列表
-- 上传文档到指定知识库
-- 查看知识库统计信息
-- 查看向量数据、文件来源
-- 按文件来源删除向量数据
-
-### 3. 文档处理
-
-- 支持 PDF、TXT、DOCX 文件格式
-- PDF 读取文本内容，如果文本不足则自动切换 OCR 识别
-- DOCX 读取段落和表格内容
-- TXT 直接读取文本
-
-### 4. RAG（Retrieval-Augmented Generation）流程
-
-该项目的 RAG 流程包括以下步骤：
-
-1. 用户上传文档到知识库。
-2. `FileProcessor` 提取文件文本。
-3. `TextSplitter` 将长文本拆分为多个语义块。
-4. `EmbeddingModel` 将每个文本块转为向量。默认使用 Ollama 的嵌入接口；不可用时使用本地字符哈希降级。
-5. `VectorStore` 使用 Faiss 构建本地向量索引，并保存文本、元数据、ID 等。
-6. 用户提问时，`QAModule` 生成查询向量并检索最相似的文档块。
-7. 将检索到的文档块拼接成上下文，并构建提示词发送给 LLM。
-8. 如果知识库中有相关上下文，则返回基于知识库的回答；否则使用常规模型回答。
-9. 将问题 / 回答 / 来源 / 会话 ID 保存到 MySQL 学习记录中。
-
-## RAG 实现细节
-
-### 文本分块
-
-- 使用 `TextSplitter` 将每页文本按段落拆分
-- 每个分块最大长度 `500` 字符，重叠 `100` 字符
-- 处理超长段落，尽量保持语义完整
-
-### 嵌入与向量存储
-
-- 使用 `EmbeddingModel.get_embedding` 获取文本嵌入
-- `VectorStore.add_embeddings` 归一化向量并写入 Faiss 索引
-- 本地持久化：`*_vector_store.pkl` 和 `*_faiss.index`
-- 查询时使用内积搜索，转换为相似度结果
-
-### 上下文构建与回答生成
-
-- 如果检索到文档上下文，`QAModule._build_prompt` 会将上下文与问题合并
-- 如果没有上下文，则直接发送问题给 LLM
-- 默认生成模型为 `qwen2.5:7b`
-- 可使用 `Ollama` 本地模型或 `DeepSeek` API
-
-## 如何使用
+## 安装与启动
 
 ### 1. 安装依赖
 
@@ -104,86 +186,134 @@
 pip install -r requirements.txt
 ```
 
-### 2. 复制环境变量模板
+### 2. 准备环境变量
 
 ```bash
 copy .env.example .env
 ```
 
-### 3. 填写 `.env`
-
 至少配置：
 
+- `SECRET_KEY`
 - `MYSQL_HOST`
 - `MYSQL_USER`
 - `MYSQL_PASSWORD`
 - `MYSQL_DB`
 - `OLLAMA_BASE_URL`
-- `USE_OLLAMA=true`
+- `OLLAMA_MODEL`
+- `OLLAMA_EMBEDDING_MODEL`
 
-如果需要远程模型服务，可额外填写：
+如果使用邮箱验证码和密码重置，还需要配置：
 
-- `DEEPSEEK_API_KEY`
-- `KIMI_API_KEY`
-- `ZHIPU_API_KEY`
 - `QQ_EMAIL`
 - `QQ_EMAIL_AUTH_CODE`
 
-### 4. 启动数据库
+### 3. 准备 MySQL
 
-确保 MySQL 服务已启动，并且 `.env` 中的 `zhixueban` 数据库可访问。
+确保 MySQL 已启动，并且 `.env` 中配置的数据库可访问。
 
-如果需要手动初始化数据库，可以运行：
+`run.py` 会执行：
+
+- 数据库连接检查
+- 创建缺失的数据表
+- 执行轻量级运行时字段兼容检查
+- 启动 Flask 服务
+
+### 4. 启动项目
 
 ```bash
 python run.py
 ```
 
-`run.py` 会检查数据库连接、创建表并启动 Flask 服务器。
+默认访问：
 
-### 5. 启动项目
-
-```bash
-python run.py
-```
-
-默认访问地址：
-
-```
+```text
 http://localhost:5000
 ```
 
-### 6. 使用流程
+## 默认管理员
 
-- 访问 `/register` 创建用户
-- 登录后访问首页、个人中心、知识库页面
-- 上传文档到知识库
-- 在问答界面输入问题，系统会先尝试检索知识库，然后生成回答
-- 可在个人中心配置 API 密钥
+`init_admin.py` 会创建或修复默认管理员账号：
 
-## 项目运行时说明
+| 角色 | 用户名 | 密码 | 邮箱 |
+| --- | --- | --- | --- |
+| 管理员 | `admin` | `Admin@2026` | `admin@zhixueban.com` |
 
-- `uploads/` 目录用于保存用户上传文档
-- `static/avatars/` 用于保存头像上传
-- `knowledge_base_*_vector_store.pkl` 和 `*_faiss.index` 为知识库持久化文件
-- 如果 `Ollama` 未连接成功，系统会回退到本地向量 fallback 嵌入
+首次部署到真实环境后，请尽快修改默认密码。
 
-## 进一步扩展建议
+教师和学生账号可在管理员后台 `/admin` 中创建，例如：
 
-- 增加更多模型支持，如 OpenAI、Azure、本地 LLM
-- 增加知识库向量数据删除接口的前端操作
-- 增加用户权限和角色管理
-- 增强问答结果的来源可视化
-- 将知识库索引迁移到 Milvus、Pinecone 或 Weaviate
+| 角色 | 示例用户名 | 示例密码 | 说明 |
+| --- | --- | --- | --- |
+| 教师 | `teacher` | `Teacher@2026` | 可发布班级知识库 |
+| 学生 | `student` | `Student@2026` | 可创建个人知识库，读取班级知识库 |
 
-## 逐步思考
+## 常用页面
 
-1. 先明确项目目标：构建一个带知识检索的学习助手。
-2. 用 Flask 搭建 Web/API 框架，MySQL 保存用户与学习记录。
-3. 将文档处理模块独立出来，支持 PDF/OCR、DOCX、TXT。
-4. 用文本分块减少检索粒度，避免上下文过长。
-5. 用向量化 + Faiss 实现近似搜索，构建知识库索引。
-6. 结合 LLM 生成回答，实现 `retrieval + generation`。
-7. 设计知识库管理接口、用户认证、API 密钥管理。
-8. 考虑异常情况：OCR 失败、Faiss 文件读取失败、Ollama 未连通。
-9. 最终让系统支持用户上传文档、检索知识、生成答案并记录历史。
+- `/`：首页问答
+- `/knowledge-base`：知识库管理
+- `/records`：学习记录
+- `/profile`：个人中心
+- `/admin`：管理员后台
+- `/login`：登录
+- `/register`：注册
+
+## 使用流程
+
+1. 启动 MySQL、Ollama 和 Flask 项目。
+2. 使用管理员账号登录。
+3. 在 `/admin` 创建教师和学生用户，或修改已有用户角色。
+4. 在 `/admin` 创建班级、选择负责教师，并把学生加入对应班级。
+5. 教师登录后进入 `/knowledge-base`，选择创建个人知识库或发布班级知识库。
+6. 发布班级知识库时选择指定班级，然后上传 PDF、TXT、DOCX 文档。
+7. 学生登录后可以创建个人知识库，也可以在首页选择自己所在班级的知识库问答。
+7. 首页提问时会显示“正在检索知识库”“已命中知识片段”等流式状态。
+8. 如果回答使用了知识库，回答下方会展示参考来源。
+
+## 运行时文件说明
+
+以下文件不应提交到 Git：
+
+- `.env`
+- `uploads/`
+- `static/avatars/`
+- `knowledge_base_*_langchain_faiss/`
+- `knowledge_base_*_vector_store.pkl`
+- `knowledge_base_*_faiss.index`
+
+其中 `knowledge_base_*_langchain_faiss/` 是当前 LangChain FAISS 的本地持久化目录。
+
+## 常见问题
+
+### DOCX 上传失败
+
+确认已安装：
+
+```bash
+pip install python-docx==0.8.11
+```
+
+### PDF OCR 报 NumPy 兼容错误
+
+项目包含 `app/utils/numpy_compat.py`，用于兼容 PaddleOCR 在 NumPy 2.x 下访问 `np.sctypes` 的问题。
+
+### 中文知识库名导致 Faiss 保存失败
+
+向量库目录已改为 ASCII 安全目录名加哈希，页面仍显示原始中文知识库名。
+
+### 页面仍显示旧乱码或旧脚本
+
+浏览器强制刷新：
+
+```text
+Ctrl + F5
+```
+
+也可以重启 Flask 服务后再刷新。
+
+## 验证命令
+
+```bash
+python -m py_compile app.py app/services/ai_service.py app/services/knowledge_service.py app/utils/file_processor.py app/utils/vector_service.py
+node --check static/js/shared.js
+```

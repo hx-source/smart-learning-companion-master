@@ -7,6 +7,12 @@
     <div class="nav-items">
         <a href="/" class="nav-item {% if request.path == '/' %}active{% endif %}">首页答疑</a>
         <a href="/knowledge-base" class="nav-item {% if request.path == '/knowledge-base' %}active{% endif %}">知识库</a>
+        {% if request.current_user and request.current_user.has_role('teacher', 'admin') %}
+        <a href="/admin" id="adminNavItem" class="nav-item {% if request.path == '/admin' %}active{% endif %}" onclick="window.location.href='/admin'; return false;">后台</a>
+        {% endif %}
+        {% if request.current_user and request.current_user.has_role('student') and not request.current_user.has_role('teacher', 'admin') %}
+        <a href="/my-classes" class="nav-item {% if request.path == '/my-classes' %}active{% endif %}">我的班级</a>
+        {% endif %}
         <a href="/profile" class="nav-item {% if request.path == '/profile' %}active{% endif %}">个人中心</a>
     </div>
     <div class="user-info" id="userInfo" style="display: none;">

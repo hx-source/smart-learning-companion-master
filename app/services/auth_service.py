@@ -1,5 +1,7 @@
-"""
-认证服务
+"""认证与访问控制服务。
+
+这里集中处理密码哈希、邮箱/密码格式校验、JWT 生成与解析、
+登录失败锁定、CSRF 校验，以及页面/API 路由的认证装饰器。
 """
 import re
 import bcrypt
@@ -11,25 +13,33 @@ from flask import request, jsonify, current_app
 from app.models import User, UserLog
 
 class AuthService:
+    """无状态认证工具类。
+
+    类方法本身不保存用户会话；会话状态放在 JWT、Cookie 和数据库字段中。
+    """
     MAX_LOGIN_ATTEMPTS = 5
     LOCKOUT_DURATION = 15
     PASSWORD_MIN_LENGTH = 8
 
     @staticmethod
     def hash_password(password):
+        """使用 bcrypt 哈希密码，数据库只保存哈希后的字符串。"""
         return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
     @staticmethod
     def verify_password(password, hashed):
+        """校验明文密码和数据库中的 bcrypt 哈希是否匹配。"""
         return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
     @staticmethod
     def validate_email(email):
+        """做基础邮箱格式校验，避免明显错误的数据进入注册流程。"""
         pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         return re.match(pattern, email) is not None
 
     @staticmethod
     def validate_password(password):
+        """校验密码强度：长度、大小写字母和数字都必须满足。"""
         if len(password) < AuthService.PASSWORD_MIN_LENGTH or len(password) > 20:
             return False, "密码长度需为8-20个字符"
         if not re.search(r'[A-Z]', password):
@@ -42,6 +52,10 @@ class AuthService:
 
     @staticmethod
     def generate_token(user_id, remember=False):
+        """生成 JWT 登录令牌。
+
+        `remember=True` 时延长有效期；`jti` 用于给每个令牌一个唯一编号。
+        """
         expiration = timedelta(days=7) if remember else timedelta(hours=24)
         payload = {
             'user_id': user_id,
@@ -53,6 +67,7 @@ class AuthService:
 
     @staticmethod
     def decode_token(token):
+        """解析并校验 JWT，过期或签名不合法时返回 None。"""
         try:
             payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
             return payload
@@ -63,6 +78,7 @@ class AuthService:
 
     @staticmethod
     def generate_verification_code():
+        """生成 6 位数字验证码，用于邮箱验证和找回密码。"""
         return ''.join([str(secrets.randbelow(10)) for _ in range(6)])
 
     @staticmethod
@@ -75,6 +91,7 @@ class AuthService:
 
     @staticmethod
     def is_account_locked(user):
+        """判断账户是否仍处于登录失败后的锁定时间内。"""
         if user.locked_until and user.locked_until > datetime.utcnow():
             remaining = (user.locked_until - datetime.utcnow()).seconds
             return True, remaining
@@ -82,6 +99,7 @@ class AuthService:
 
     @staticmethod
     def record_failed_login(user):
+        """记录一次登录失败；超过阈值后锁定账号并写入安全日志。"""
         user.login_attempts += 1
         if user.login_attempts >= AuthService.MAX_LOGIN_ATTEMPTS:
             user.locked_until = datetime.utcnow() + timedelta(minutes=AuthService.LOCKOUT_DURATION)
@@ -110,12 +128,19 @@ class AuthService:
 
 
 def token_required(f):
+    """API 路由认证装饰器。
+
+    前端需要在 Authorization 头中传入 `Bearer <token>`。
+    校验通过后把当前用户挂到 `request.current_user`，供视图函数直接使用。
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
         token = None
         auth_header = request.headers.get('Authorization')
         if auth_header and auth_header.startswith('Bearer '):
             token = auth_header.split(' ')[1]
+        if not token:
+            token = request.cookies.get('token')
 
         if not token:
             return jsonify({'error': '缺少认证令牌'}), 401
@@ -133,7 +158,29 @@ def token_required(f):
     return decorated
 
 
+def role_required(*roles):
+    """Require the current JWT user to have one of the given roles."""
+    def decorator(f):
+        @wraps(f)
+        @token_required
+        def decorated(*args, **kwargs):
+            user = request.current_user
+            user_role = user.role or ('admin' if user.is_admin else 'student')
+            if user_role not in roles and not user.is_admin:
+                return jsonify({'error': 'Permission denied'}), 403
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+
+admin_required = role_required('admin')
+
+
 def csrf_protect(f):
+    """写操作 CSRF 防护装饰器。
+
+    对 POST/PUT/DELETE/PATCH 请求，要求请求头中的 X-CSRF-Token 与 Cookie 匹配。
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
         try:
@@ -149,7 +196,10 @@ def csrf_protect(f):
 
 
 def auth_required(f):
-    """页面路由认证装饰器"""
+    """页面路由认证装饰器。
+
+    页面访问使用 Cookie 中的 token；未登录或令牌失效时跳转到登录页。
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
         from flask import redirect, url_for

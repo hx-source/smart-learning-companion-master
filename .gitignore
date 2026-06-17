@@ -35,3 +35,4 @@ data/
 static/avatars/
 knowledge_base_*_vector_store.pkl
 knowledge_base_*_faiss.index
+knowledge_base_*_langchain_faiss/

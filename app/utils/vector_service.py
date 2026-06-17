@@ -1,504 +1,404 @@
+"""LangChain 向量服务模块。
+
+EmbeddingModel 实现 LangChain 的 Embeddings 接口，优先调用 Ollama 嵌入模型；
+VectorStore 使用 LangChain Community 的 FAISS 向量库负责持久化和检索。
+外部方法名保留原项目的接口，方便 Flask 路由和知识库服务平滑迁移。
 """
-向量服务模块
-包含向量嵌入和向量存储功能
-"""
-import requests
+
+import math
 import os
 import pickle
-import numpy as np
-from dotenv import load_dotenv
+import hashlib
+import re
+import shutil
 import time
+
+import requests
+from dotenv import load_dotenv
+from langchain_community.vectorstores import FAISS
+from langchain_core.embeddings import Embeddings
+
 from config import Config
 
 load_dotenv()
 
-class EmbeddingModel:
-    """向量嵌入模型"""
+
+def _safe_collection_path_name(collection_name):
+    """Return a stable ASCII-only name for vector-store files/directories."""
+    ascii_name = collection_name.encode("ascii", "ignore").decode("ascii")
+    ascii_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", ascii_name).strip("._-")
+
+    if ascii_name == collection_name and ascii_name:
+        return ascii_name[:120]
+
+    digest = hashlib.sha1(collection_name.encode("utf-8")).hexdigest()[:12]
+    prefix = ascii_name[:80].strip("._-") or "collection"
+    return f"{prefix}_{digest}"
+
+
+class EmbeddingModel(Embeddings):
+    """LangChain Embeddings 适配器。
+
+    优先调用 Ollama `/api/embeddings`；如果 Ollama 不可用，则使用字符哈希生成
+    fallback 向量，让知识库管理页和基础检索流程仍能运行。
+    """
+
     _initialized = False
-    
+
     def __init__(self, model_name=None):
-        """初始化嵌入模型
-
-        Args:
-            model_name: 模型名称
-        """
         self.model_name = model_name or Config.OLLAMA_EMBEDDING_MODEL
+        self.ollama_url = Config.OLLAMA_BASE_URL
         self.use_ollama = True
-        self.vector_dimension = 1024  # bge-m3 模型的向量维度
+        self.vector_dimension = 1024
 
-        # 配置Ollama客户端
-        ollama_url = Config.OLLAMA_BASE_URL
-        self.ollama_url = ollama_url
-        
         if not EmbeddingModel._initialized:
-            print(f"Ollama URL: {ollama_url}")
-            pass
+            print(f"Ollama URL: {self.ollama_url}")
 
         try:
-            # 测试Ollama连接
-            response = requests.get(f"{ollama_url}/api/tags", timeout=10)
-            if response.status_code == 200:
-                # 移除重复的打印语句
-                pass
-                # 测试生成一个嵌入，确定向量维度
-                test_embedding = self.get_embedding("测试文本")
-                if test_embedding:
-                    self.vector_dimension = len(test_embedding)
-                    if not EmbeddingModel._initialized:
-                        print(f"向量维度: {self.vector_dimension}")
-            else:
-                raise Exception(f"Ollama API返回错误: {response.status_code}")
+            response = requests.get(f"{self.ollama_url}/api/tags", timeout=10)
+            if response.status_code != 200:
+                raise RuntimeError(f"Ollama API返回错误: {response.status_code}")
+
+            test_embedding = self.get_embedding("测试文本")
+            if test_embedding:
+                self.vector_dimension = len(test_embedding)
+                if not EmbeddingModel._initialized:
+                    print(f"向量维度: {self.vector_dimension}")
         except Exception as e:
             if not EmbeddingModel._initialized:
                 print(f"Ollama连接失败: {str(e)}")
                 print("使用默认的嵌入方法")
             self.use_ollama = False
-            # 设置默认向量维度
             self.vector_dimension = 512
-        
+
         EmbeddingModel._initialized = True
 
+    def embed_documents(self, texts):
+        """LangChain 批量嵌入入口。"""
+        return self.get_batch_embeddings(texts)
+
+    def embed_query(self, text):
+        """LangChain 查询嵌入入口。"""
+        return self.get_embedding(text)
+
     def get_embedding(self, text):
-        """获取单个文本的嵌入向量
-
-        Args:
-            text: 文本
-
-        Returns:
-            嵌入向量
-        """
+        """获取单个文本的嵌入向量。"""
         if not text:
-            return [0.0] * self.vector_dimension  # 返回零向量
+            return [0.0] * self.vector_dimension
 
-        if self.use_ollama:
-            try:
-                # 限制文本长度，避免API超时
-                text = text[:2000]  # 限制为2000个字符
-                response = requests.post(
-                    f"{self.ollama_url}/api/embeddings",
-                    json={
-                        "model": self.model_name,
-                        "prompt": text
-                    },
-                    timeout=30  # 设置超时时间
-                )
-                if response.status_code == 200:
-                    result = response.json()
-                    embedding = result.get('embedding', [])
-                    # 确保返回的向量维度一致
-                    if len(embedding) != self.vector_dimension:
-                        # 调整向量维度
-                        if len(embedding) > self.vector_dimension:
-                            embedding = embedding[:self.vector_dimension]
-                        else:
-                            embedding.extend([0.0] * (self.vector_dimension - len(embedding)))
-                    return embedding
+        if not self.use_ollama:
+            return self._fallback_embedding(text)
+
+        try:
+            text = text[:2000]
+            response = requests.post(
+                f"{self.ollama_url}/api/embeddings",
+                json={"model": self.model_name, "prompt": text},
+                timeout=30,
+            )
+            if response.status_code != 200:
+                raise RuntimeError(f"Ollama API返回错误: {response.status_code}")
+
+            embedding = response.json().get("embedding", [])
+            if len(embedding) != self.vector_dimension:
+                if len(embedding) > self.vector_dimension:
+                    embedding = embedding[: self.vector_dimension]
                 else:
-                    raise Exception(f"Ollama API返回错误: {response.status_code}")
-            except Exception as e:
-                print(f"Ollama嵌入失败: {str(e)}")
-                # 使用基于字符的哈希作为 fallback，确保向量维度一致
-                return self._fallback_embedding(text)
-        else:
-            # 使用基于字符的哈希作为 fallback
+                    embedding.extend([0.0] * (self.vector_dimension - len(embedding)))
+            return embedding
+        except Exception as e:
+            print(f"Ollama嵌入失败: {str(e)}")
             return self._fallback_embedding(text)
 
     def get_batch_embeddings(self, texts, batch_size=8):
-        """批量获取文本的嵌入向量
-
-        Args:
-            texts: 文本列表
-            batch_size: 批处理大小
-
-        Returns:
-            嵌入向量列表
-        """
+        """批量获取文本嵌入。"""
         embeddings = []
         total_texts = len(texts)
-
         for i in range(0, total_texts, batch_size):
-            batch = texts[i:i + batch_size]
-            batch_embeddings = []
-
-            for text in batch:
-                embedding = self.get_embedding(text)
-                batch_embeddings.append(embedding)
-                # 添加小延迟以避免API限制
-                time.sleep(0.1)
-
-            embeddings.extend(batch_embeddings)
+            batch = texts[i : i + batch_size]
+            embeddings.extend(self.get_embedding(text) for text in batch)
+            time.sleep(0.1)
             print(f"已处理 {min(i + batch_size, total_texts)}/{total_texts} 个文本")
-
         return embeddings
 
     def _fallback_embedding(self, text):
-        """基于字符哈希的fallback嵌入方法
-
-        Args:
-            text: 文本
-
-        Returns:
-            嵌入向量
-        """
-        # 使用字符哈希生成固定维度的向量
+        """基于字符哈希的 fallback 嵌入方法。"""
         embedding = [0.0] * self.vector_dimension
-        for i, char in enumerate(text):
-            # 使用字符的Unicode码点作为种子
-            char_code = ord(char) % self.vector_dimension
-            embedding[char_code] += 1.0
+        for char in text:
+            embedding[ord(char) % self.vector_dimension] += 1.0
 
-        # 归一化
-        import math
-        norm = math.sqrt(sum(x ** 2 for x in embedding))
+        norm = math.sqrt(sum(x**2 for x in embedding))
         if norm > 0:
             embedding = [x / norm for x in embedding]
-
         return embedding
 
+
 class VectorStore:
-    """向量存储"""
+    """基于 LangChain FAISS 的本地向量存储。"""
+
     _initialized = False
-    
+
     def __init__(self, collection_name="knowledge_base"):
-        """初始化向量存储（使用 Faiss）
-
-        Args:
-            collection_name: 集合名称
-        """
         self.collection_name = collection_name
-        self.data_file = f"./{collection_name}_vector_store.pkl"
-        self.index_file = f"./{collection_name}_faiss.index"
-
-        # 文档和元数据存储
+        self.safe_collection_name = _safe_collection_path_name(collection_name)
+        self.store_dir = f"./{self.safe_collection_name}_langchain_faiss"
+        self.legacy_data_file = f"./{self.safe_collection_name}_vector_store.pkl"
+        self.legacy_raw_data_file = f"./{collection_name}_vector_store.pkl"
+        self.embedding_model = EmbeddingModel()
+        self.store = None
         self.documents = []
         self.metadatas = []
         self.ids = []
-        self.vector_dimension = 1024  # bge-m3 模型的向量维度
-
-        # 初始化 Faiss 索引
-        self._init_faiss_index()
-
-        # 加载已有数据
+        self.vector_dimension = self.embedding_model.vector_dimension
         self._load_data()
-        
         VectorStore._initialized = True
 
-    def _init_faiss_index(self):
-        """初始化 Faiss 索引"""
-        import faiss
-
-        # 检查是否存在保存的索引
-        if os.path.exists(self.index_file):
-            self.index = faiss.read_index(self.index_file)
-            if not VectorStore._initialized:
-                print(f"加载 Faiss 索引: {self.index_file}")
-        else:
-            # 创建新的索引（使用内积，等同于余弦相似度当向量归一化后）
-            self.index = faiss.IndexFlatIP(self.vector_dimension)
-            if not VectorStore._initialized:
-                print(f"创建新的 Faiss 索引，维度: {self.vector_dimension}")
-
-        self.use_faiss = True
-
     def _load_data(self):
-        """加载文档和元数据"""
-        if os.path.exists(self.data_file):
+        """加载 LangChain FAISS 持久化目录。"""
+        if os.path.isdir(self.store_dir):
             try:
-                with open(self.data_file, 'rb') as f:
-                    data = pickle.load(f)
-                    self.documents = data.get('documents', [])
-                    self.metadatas = data.get('metadatas', [])
-                    self.ids = data.get('ids', [])
+                self.store = FAISS.load_local(
+                    self.store_dir,
+                    self.embedding_model,
+                    allow_dangerous_deserialization=True,
+                )
+                self._sync_cache_from_store()
                 if not VectorStore._initialized:
-                    print(f"加载了 {len(self.documents)} 个文档")
+                    print(f"加载 LangChain FAISS 向量库: {self.store_dir}")
             except Exception as e:
-                if not VectorStore._initialized:
-                    print(f"加载数据失败: {str(e)}")
+                print(f"加载 LangChain FAISS 向量库失败: {str(e)}")
+                self.store = None
+                self._sync_cache_from_store()
+        elif os.path.exists(self.legacy_data_file) or os.path.exists(self.legacy_raw_data_file):
+            self._migrate_legacy_store()
+        else:
+            self._sync_cache_from_store()
+
+    def _migrate_legacy_store(self):
+        """把旧版 pickle/Faiss 存储迁移到 LangChain FAISS 目录。
+
+        旧索引文件不直接复用，因为 LangChain 会维护自己的 docstore 和 id 映射。
+        这里读取旧 pickle 中的原文、元数据和 ID，然后重新生成向量写入新目录。
+        """
+        try:
+            legacy_file = self.legacy_data_file if os.path.exists(self.legacy_data_file) else self.legacy_raw_data_file
+            with open(legacy_file, "rb") as f:
+                data = pickle.load(f)
+            documents = data.get("documents", [])
+            metadatas = data.get("metadatas", [])
+            ids = data.get("ids", [])
+
+            if not documents:
+                self._sync_cache_from_store()
+                return
+
+            print(f"正在迁移旧版向量库到 LangChain FAISS: {legacy_file}")
+            self.add_embeddings(documents, metadatas=metadatas, ids=ids or None)
+            print(f"旧版向量库迁移完成: {len(documents)} 个文档片段")
+        except Exception as e:
+            print(f"迁移旧版向量库失败: {str(e)}")
+            self.store = None
+            self._sync_cache_from_store()
 
     def _save_data(self):
-        """保存文档和元数据"""
-        try:
-            data = {
-                'documents': self.documents,
-                'metadatas': self.metadatas,
-                'ids': self.ids
-            }
-            with open(self.data_file, 'wb') as f:
-                pickle.dump(data, f)
+        """保存 LangChain FAISS 向量库。"""
+        if self.store is not None:
+            os.makedirs(self.store_dir, exist_ok=True)
+            self.store.save_local(self.store_dir)
+        self._sync_cache_from_store()
 
-            # 保存 Faiss 索引
-            if self.use_faiss:
-                import faiss
-                faiss.write_index(self.index, self.index_file)
-
-            print(f"保存了 {len(self.documents)} 个文档")
-        except Exception as e:
-            print(f"保存数据失败: {str(e)}")
-
-    def _normalize_vectors(self, vectors):
-        """归一化向量（用于余弦相似度）"""
-        vectors = np.array(vectors, dtype=np.float32)
-        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-        norms = np.where(norms == 0, 1, norms)  # 避免除零
-        return vectors / norms
-
-    def add_embeddings(self, documents, embeddings, metadatas=None, ids=None):
-        """添加向量嵌入
-
-        Args:
-            documents: 文档列表
-            embeddings: 嵌入向量列表
-            metadatas: 元数据列表
-            ids: 文档ID列表
-        """
-        if not ids:
-            # 生成新的 ID
-            start_idx = len(self.documents)
-            ids = [f"doc_{start_idx + i}" for i in range(len(documents))]
-
-        if not metadatas:
-            metadatas = [{} for _ in range(len(documents))]
-
-        # 归一化向量
-        normalized_embeddings = self._normalize_vectors(embeddings)
-
-        # 添加到 Faiss 索引
-        self.index.add(normalized_embeddings)
-
-        # 保存文档和元数据
-        self.documents.extend(documents)
-        self.metadatas.extend(metadatas)
-        self.ids.extend(ids)
-
-        self._save_data()
-        print(f"已添加 {len(documents)} 个文档")
-
-    def search(self, query_embedding, n_results=5, where=None):
-        """搜索相似向量
-
-        Args:
-            query_embedding: 查询向量
-            n_results: 返回结果数量
-            where: 过滤条件（暂不支持）
-
-        Returns:
-            搜索结果
-        """
-        if len(self.documents) == 0:
-            return {"documents": [[]], "distances": [[]], "metadatas": [[]], "ids": [[]]}
-
-        # 归一化查询向量
-        query_vec = self._normalize_vectors([query_embedding])
-
-        # 确保 n_results 不超过文档数量
-        n_results = min(n_results, len(self.documents))
-
-        # 使用 Faiss 搜索
-        distances, indices = self.index.search(query_vec, n_results)
-
-        # Faiss 返回的是内积，转换为距离（1 - 相似度）
-        distances = 1 - distances
-
-        result_indices = indices[0]
-
-        # 构建结果
-        results = {
-            "documents": [[self.documents[i] for i in result_indices]],
-            "distances": [distances[0].tolist() if self.use_faiss else distances[0]],
-            "metadatas": [[self.metadatas[i] for i in result_indices]],
-            "ids": [[self.ids[i] for i in result_indices]]
-        }
-
-        return results
-
-    def get(self, ids):
-        """根据ID获取文档
-
-        Args:
-            ids: 文档ID列表
-
-        Returns:
-            文档信息
-        """
-        indices = [self.ids.index(id) for id in ids if id in self.ids]
-        return {
-            "documents": [self.documents[i] for i in indices],
-            "metadatas": [self.metadatas[i] for i in indices],
-            "ids": [self.ids[i] for i in indices]
-        }
-
-    def update(self, ids, documents=None, embeddings=None, metadatas=None):
-        """更新文档
-
-        Args:
-            ids: 文档ID列表
-            documents: 文档列表
-            embeddings: 嵌入向量列表
-            metadatas: 元数据列表
-        """
-        for i, id in enumerate(ids):
-            if id in self.ids:
-                index = self.ids.index(id)
-                if documents:
-                    self.documents[index] = documents[i]
-                if metadatas:
-                    self.metadatas[index] = metadatas[i]
-                # 注意：Faiss 不支持直接更新，需要重建索引
-                if embeddings:
-                    print("警告: Faiss 索引不支持直接更新向量，请删除后重新添加")
-
-        self._save_data()
-
-    def delete(self, ids):
-        """删除文档
-
-        Args:
-            ids: 文档ID列表
-
-        Returns:
-            int: 实际删除的文档数量
-        """
-        # 去除重复ID，确保每个ID只处理一次
-        unique_ids = list(set(ids))
-        
-        # 找出所有要删除的索引
-        indices_to_delete = []
-        for id in unique_ids:
-            if id in self.ids:
-                # 处理可能存在的重复ID情况
-                for i, existing_id in enumerate(self.ids):
-                    if existing_id == id:
-                        indices_to_delete.append(i)
-        
-        # 按降序排序，确保从后往前删除
-        indices_to_delete = sorted(list(set(indices_to_delete)), reverse=True)
-
-        for index in indices_to_delete:
-            del self.documents[index]
-            del self.metadatas[index]
-            del self.ids[index]
-
-        # Faiss 不支持直接删除，需要重建索引
-        self._rebuild_index()
-        self._save_data()
-        deleted_count = len(indices_to_delete)
-        print(f"已删除 {deleted_count} 个文档")
-        return deleted_count
-
-    def _rebuild_index(self):
-        """重建 Faiss 索引"""
-        import faiss
-
-        # 创建新索引
-        self.index = faiss.IndexFlatIP(self.vector_dimension)
-
-        # 如果有文档，重新添加
-        if self.documents:
-            # 重新生成所有文档的嵌入向量
-            embedding_model = EmbeddingModel()
-            embeddings = embedding_model.get_batch_embeddings(self.documents)
-            
-            # 归一化向量
-            normalized_embeddings = self._normalize_vectors(embeddings)
-            
-            # 添加到 Faiss 索引
-            self.index.add(normalized_embeddings)
-            print(f"索引已重建，添加了 {len(self.documents)} 个文档")
-
-    def clear(self):
-        """清空向量库"""
+    def _sync_cache_from_store(self):
+        """把 LangChain docstore 同步为旧接口使用的 documents/metadatas/ids。"""
         self.documents = []
         self.metadatas = []
         self.ids = []
+        if self.store is None:
+            return
 
-        # 重建索引
-        import faiss
-        self.index = faiss.IndexFlatIP(self.vector_dimension)
+        for _, docstore_id in sorted(self.store.index_to_docstore_id.items()):
+            doc = self.store.docstore.search(docstore_id)
+            if isinstance(doc, str):
+                continue
+            metadata = dict(doc.metadata or {})
+            metadata.setdefault("doc_id", docstore_id)
+            self.documents.append(doc.page_content)
+            self.metadatas.append(metadata)
+            self.ids.append(docstore_id)
 
-        # 删除文件
-        if os.path.exists(self.data_file):
-            os.remove(self.data_file)
-        if os.path.exists(self.index_file):
-            os.remove(self.index_file)
+    def add_embeddings(self, documents, embeddings=None, metadatas=None, ids=None):
+        """添加文本到 LangChain FAISS。
 
+        `embeddings` 参数保留旧接口兼容性，实际嵌入由 LangChain 调用
+        EmbeddingModel 完成。
+        """
+        if not documents:
+            return
+
+        if ids is None:
+            start_idx = len(self.ids)
+            ids = [f"doc_{start_idx + i}" for i in range(len(documents))]
+
+        if metadatas is None:
+            metadatas = [{} for _ in documents]
+
+        normalized_metadatas = []
+        for doc_id, metadata in zip(ids, metadatas):
+            item = dict(metadata or {})
+            item["doc_id"] = doc_id
+            normalized_metadatas.append(item)
+
+        if self.store is None:
+            self.store = FAISS.from_texts(
+                documents,
+                self.embedding_model,
+                metadatas=normalized_metadatas,
+                ids=ids,
+            )
+        else:
+            self.store.add_texts(
+                documents,
+                metadatas=normalized_metadatas,
+                ids=ids,
+            )
+
+        self._save_data()
+        print(f"已添加 {len(documents)} 个文档片段")
+
+    def search(self, query, n_results=5, where=None):
+        """搜索相似文档。
+
+        Args:
+            query: 查询文本或已经生成好的查询向量。
+            n_results: 返回结果数量。
+            where: 预留过滤条件，当前保持旧接口兼容。
+        """
+        if self.store is None or len(self.ids) == 0:
+            return {"documents": [[]], "distances": [[]], "metadatas": [[]], "ids": [[]]}
+
+        n_results = min(n_results, len(self.ids))
+        if isinstance(query, str):
+            docs_and_scores = self.store.similarity_search_with_score(query, k=n_results)
+        else:
+            docs_and_scores = self.store.similarity_search_with_score_by_vector(query, k=n_results)
+
+        documents = []
+        distances = []
+        metadatas = []
+        ids = []
+        for doc, score in docs_and_scores:
+            metadata = dict(doc.metadata or {})
+            doc_id = metadata.get("doc_id")
+            documents.append(doc.page_content)
+            distances.append(float(score))
+            metadatas.append(metadata)
+            ids.append(doc_id)
+
+        return {
+            "documents": [documents],
+            "distances": [distances],
+            "metadatas": [metadatas],
+            "ids": [ids],
+        }
+
+    def get(self, ids):
+        """根据 ID 获取文档。"""
+        docs = []
+        metadatas = []
+        found_ids = []
+        if self.store is None:
+            return {"documents": docs, "metadatas": metadatas, "ids": found_ids}
+
+        for doc_id in ids:
+            doc = self.store.docstore.search(doc_id)
+            if isinstance(doc, str):
+                continue
+            docs.append(doc.page_content)
+            metadatas.append(doc.metadata)
+            found_ids.append(doc_id)
+        return {"documents": docs, "metadatas": metadatas, "ids": found_ids}
+
+    def update(self, ids, documents=None, embeddings=None, metadatas=None):
+        """更新文档。
+
+        FAISS 不适合原地更新，保持旧行为：提示使用删除后重新添加。
+        """
+        print("警告: LangChain FAISS 不支持稳定的原地更新，请删除后重新添加")
+
+    def delete(self, ids):
+        """删除文档并持久化。"""
+        if self.store is None:
+            return 0
+
+        unique_ids = [doc_id for doc_id in set(ids) if doc_id]
+        before = len(self.ids)
+        if unique_ids:
+            self.store.delete(unique_ids)
+            self._save_data()
+        deleted_count = before - len(self.ids)
+        print(f"已删除 {deleted_count} 个文档片段")
+        return deleted_count
+
+    def clear(self):
+        """清空向量库。"""
+        self.store = None
+        self.documents = []
+        self.metadatas = []
+        self.ids = []
+        if os.path.isdir(self.store_dir):
+            shutil.rmtree(self.store_dir)
         print("向量库已清空")
 
     def delete_store(self):
-        """删除向量库"""
-        # 清空数据
-        self.documents = []
-        self.metadatas = []
-        self.ids = []
-
-        # 删除索引
-        import faiss
-        self.index = faiss.IndexFlatIP(self.vector_dimension)
-
-        # 删除文件
-        if os.path.exists(self.data_file):
-            os.remove(self.data_file)
-            print(f"已删除向量库文件: {self.data_file}")
-        if os.path.exists(self.index_file):
-            os.remove(self.index_file)
-            print(f"已删除Faiss索引文件: {self.index_file}")
-
+        """删除向量库。"""
+        self.clear()
         print("向量库已删除")
 
     def rename_store(self, new_name):
-        """重命名向量库"""
-        # 生成新的文件名
-        new_data_file = f"./knowledge_base_{new_name}_vector_store.pkl"
-        new_index_file = f"./knowledge_base_{new_name}_faiss.index"
-
-        # 重命名文件
-        if os.path.exists(self.data_file):
-            os.rename(self.data_file, new_data_file)
-            print(f"已重命名向量库文件: {self.data_file} -> {new_data_file}")
-        if os.path.exists(self.index_file):
-            os.rename(self.index_file, new_index_file)
-            print(f"已重命名Faiss索引文件: {self.index_file} -> {new_index_file}")
-
-        # 更新文件名
-        self.data_file = new_data_file
-        self.index_file = new_index_file
-
-        print("向量库已重命名")
+        """重命名向量库持久化目录。"""
+        new_collection_name = f"knowledge_base_{new_name}"
+        new_safe_name = _safe_collection_path_name(new_collection_name)
+        new_store_dir = f"./{new_safe_name}_langchain_faiss"
+        if os.path.isdir(self.store_dir):
+            if os.path.isdir(new_store_dir):
+                shutil.rmtree(new_store_dir)
+            os.rename(self.store_dir, new_store_dir)
+            print(f"已重命名向量库目录: {self.store_dir} -> {new_store_dir}")
+        self.collection_name = new_collection_name
+        self.safe_collection_name = new_safe_name
+        self.store_dir = new_store_dir
+        self._load_data()
 
     def update_file_paths(self, old_base_path, new_base_path):
-        """更新所有向量元数据中的文件路径
-        Args:
-            old_base_path: 旧的路径前缀
-            new_base_path: 新的路径前缀
-        """
+        """更新所有向量元数据中的文件路径。"""
+        if self.store is None:
+            return
+
         updated_count = 0
-        for metadata in self.metadatas:
-            if 'file_path' in metadata:
-                old_path = metadata['file_path']
-                if old_base_path.lower() in old_path.lower():
-                    metadata['file_path'] = old_path.replace(old_base_path, new_base_path, 1)
-                    updated_count += 1
+        for docstore_id in self.store.index_to_docstore_id.values():
+            doc = self.store.docstore.search(docstore_id)
+            if isinstance(doc, str):
+                continue
+            old_path = doc.metadata.get("file_path")
+            if old_path and old_base_path.lower() in old_path.lower():
+                doc.metadata["file_path"] = old_path.replace(old_base_path, new_base_path, 1)
+                updated_count += 1
 
         if updated_count > 0:
             self._save_data()
             print(f"已更新 {updated_count} 个向量的文件路径")
 
     def count(self):
-        """获取文档数量"""
-        return len(self.documents)
+        """获取文档片段数量。"""
+        return len(self.ids)
 
     def get_all_vectors(self):
-        """获取所有向量信息"""
-        vectors = []
-        for i, doc in enumerate(self.documents):
-            vectors.append({
-                'id': self.ids[i],
-                'content': doc,
-                'metadata': self.metadatas[i]
-            })
-        return vectors
+        """获取所有向量对应的文本和元数据。"""
+        self._sync_cache_from_store()
+        return [
+            {"id": doc_id, "content": doc, "metadata": metadata}
+            for doc_id, doc, metadata in zip(self.ids, self.documents, self.metadatas)
+        ]
 
     def get_embeddings(self):
-        """获取所有嵌入向量"""
-        # 注意：Faiss 不直接存储原始向量，这里返回空列表
-        # 如果需要原始向量，需要在添加时单独保存
+        """LangChain FAISS 不直接暴露原始嵌入，保留旧接口返回空列表。"""
         return []

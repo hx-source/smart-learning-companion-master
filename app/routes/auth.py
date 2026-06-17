@@ -1,5 +1,7 @@
-"""
-认证路由
+"""认证相关 API 路由。
+
+包含 CSRF Token、注册验证码、注册、登录、登出、当前用户、
+找回密码、修改密码和用户 API Key 配置等接口。
 """
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, make_response, current_app
@@ -11,6 +13,10 @@ import jwt
 bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
 def generate_register_token(username, email):
+    """生成短期注册令牌。
+
+    用户先请求邮箱验证码，再用该令牌和验证码完成注册，防止验证码接口参数被篡改。
+    """
     payload = {
         'username': username,
         'email': email,
@@ -22,6 +28,10 @@ def generate_register_token(username, email):
 
 @bp.route('/csrf-token', methods=['GET'])
 def get_csrf_token():
+    """下发 CSRF Token。
+
+    前端把返回值放到 X-CSRF-Token 请求头，同时浏览器保存同名 Cookie。
+    """
     csrf_token = AuthService.generate_csrf_token()
     response = make_response(jsonify({'csrf_token': csrf_token}))
     response.set_cookie('csrf_token', csrf_token, httponly=False, samesite='Lax')
@@ -30,6 +40,10 @@ def get_csrf_token():
 @bp.route('/send-verification-code', methods=['POST'])
 @csrf_protect
 def send_verification_code():
+    """发送注册验证码。
+
+    如果邮箱已有未完成注册的临时用户，则复用该记录并刷新验证码。
+    """
     data = request.get_json()
     username = data.get('username', '').strip()
     email = data.get('email', '').strip().lower()
@@ -46,6 +60,7 @@ def send_verification_code():
     if not AuthService.validate_email(email):
         return jsonify({'error': '邮箱格式不正确'}), 400
 
+    # 已完成邮箱验证的账号才视为正式占用用户名/邮箱。
     existing_user_by_name = User.get_by_username(username)
     if existing_user_by_name and existing_user_by_name.email_verified:
         return jsonify({'error': '用户名已存在'}), 409
@@ -62,6 +77,7 @@ def send_verification_code():
     if not success:
         return jsonify({'error': f'验证码发送失败: {message}'}), 500
 
+    # 未验证用户作为临时注册记录保存验证码；完成注册后再写入密码。
     existing_user = User.query.filter_by(email=email).first()
     if existing_user:
         existing_user.username = username
@@ -92,6 +108,10 @@ def send_verification_code():
 @bp.route('/register', methods=['POST'])
 @csrf_protect
 def register():
+    """完成注册。
+
+    校验注册令牌、邮箱验证码和密码强度后，把临时用户转成正式用户。
+    """
     data = request.get_json()
     register_token = data.get('register_token')
     verification_code = data.get('verification_code', '').strip()
@@ -102,6 +122,7 @@ def register():
         return jsonify({'error': '缺少必要参数'}), 400
 
     try:
+        # 注册令牌中绑定了用户名和邮箱，避免前端提交不同邮箱完成注册。
         payload = jwt.decode(register_token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
         if payload.get('purpose') != 'register':
             return jsonify({'error': '无效的注册令牌'}), 400
@@ -166,6 +187,10 @@ def register():
 
 @bp.route('/verify-email', methods=['GET'])
 def verify_email():
+    """通过邮件链接验证邮箱。
+
+    当前注册主流程使用验证码提交，该接口保留给邮件链接验证场景。
+    """
     code = request.args.get('code')
     if not code:
         return jsonify({'error': '缺少验证码'}), 400
@@ -457,39 +482,15 @@ def change_password():
 @bp.route('/api-keys', methods=['GET'])
 @token_required
 def get_api_keys():
-    """获取用户的API密钥配置"""
-    user = request.current_user
-    return jsonify({
-        'code': 200,
-        'deepseek_api_key': user.deepseek_api_key,
-        'kimi_api_key': user.kimi_api_key,
-        'zhipu_api_key': user.zhipu_api_key
-    })
+    """API key configuration has been disabled; the system uses local Ollama only."""
+    return jsonify({'code': 410, 'error': 'API key configuration is disabled; local Ollama is used only'}), 410
 
 
 @bp.route('/api-keys', methods=['POST'])
 @token_required
 def update_api_keys():
-    """更新用户的API密钥配置"""
-    data = request.get_json()
-    user = request.current_user
-
-    # 更新API密钥
-    user.deepseek_api_key = data.get('deepseek_api_key')
-    user.kimi_api_key = data.get('kimi_api_key')
-    user.zhipu_api_key = data.get('zhipu_api_key')
-
-    db.session.commit()
-
-    UserLog.log(
-        user.id, 'API_KEYS_UPDATE',
-        ip_address=request.remote_addr,
-        user_agent=request.headers.get('User-Agent'),
-        details="API密钥配置已更新",
-        status='success'
-    )
-
-    return jsonify({'message': 'API密钥配置已更新'})
+    """API key configuration has been disabled; the system uses local Ollama only."""
+    return jsonify({'code': 410, 'error': 'API key configuration is disabled; local Ollama is used only'}), 410
 
 
 @bp.route('/resend-verification', methods=['POST'])

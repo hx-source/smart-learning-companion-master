@@ -6,7 +6,11 @@ from datetime import datetime
 from app.models import db
 
 class User(db.Model):
-    """用户表"""
+    """用户表。
+
+    保存登录信息、个人资料、邮箱验证状态、账号锁定状态，
+    以及用户自己的 AI 服务配置。敏感字段如密码和 API Key 不应暴露给前端。
+    """
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -29,17 +33,19 @@ class User(db.Model):
     reset_token = db.Column(db.String(255), nullable=True)
     reset_token_expire = db.Column(db.DateTime, nullable=True)
 
-    # API密钥配置
+    # Legacy API key columns kept for old databases; current runtime uses local Ollama only.
     deepseek_api_key = db.Column(db.String(255), nullable=True)
     kimi_api_key = db.Column(db.String(255), nullable=True)
     zhipu_api_key = db.Column(db.String(255), nullable=True)
     use_ollama = db.Column(db.Boolean, default=True)
     ollama_model = db.Column(db.String(50), default='qwen2.5:7b')
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    role = db.Column(db.String(20), default='student', nullable=False, index=True)
 
     records = db.relationship('LearningRecord', backref='user', lazy='dynamic')
 
     def to_dict(self):
+        """返回可安全发送给前端的用户信息，不包含密码、验证码和 API Key。"""
         return {
             'id': self.id,
             'username': self.username,
@@ -51,8 +57,13 @@ class User(db.Model):
             'created_at': self.created_at.strftime('%Y-%m-%d') if self.created_at else None,
             'use_ollama': self.use_ollama,
             'ollama_model': self.ollama_model,
-            'is_admin': self.is_admin
+            'is_admin': self.is_admin,
+            'role': self.role or ('admin' if self.is_admin else 'student')
         }
+
+    def has_role(self, *roles):
+        role = self.role or ('admin' if self.is_admin else 'student')
+        return role in roles or self.is_admin
 
     @staticmethod
     def get_by_id(user_id):
@@ -67,10 +78,14 @@ class User(db.Model):
         return User.query.filter_by(email=email).first()
 
     def save(self):
+        """提交当前模型对象上的修改。"""
         db.session.commit()
 
 class LearningRecord(db.Model):
-    """学习记录表"""
+    """学习记录表。
+
+    每次用户提问后写入一条记录，用于历史会话、反馈统计和仪表盘展示。
+    """
     __tablename__ = 'learning_records'
     
     id = db.Column(db.Integer, primary_key=True)
@@ -84,13 +99,14 @@ class LearningRecord(db.Model):
     knowledge_base = db.Column(db.String(100))  # 使用的知识库名称
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     
-    # 复合索引
+    # 复合索引：历史记录常按用户、时间、会话查询，提前建索引提升列表页性能。
     __table_args__ = (
         db.Index('idx_user_created', 'user_id', 'created_at'),
         db.Index('idx_session_user', 'session_id', 'user_id'),
     )
     
     def to_dict(self):
+        """转换成前端历史记录列表需要的轻量结构。"""
         return {
             'id': self.id,
             'question': self.question,
@@ -117,8 +133,225 @@ class LearningRecord(db.Model):
 
 
 
+class ClassRoom(db.Model):
+    """A teaching class/course group managed by a teacher."""
+    __tablename__ = 'class_rooms'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, index=True)
+    description = db.Column(db.String(255), nullable=True)
+    teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    teacher = db.relationship('User', backref=db.backref('class_rooms', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'teacher_id': self.teacher_id,
+            'teacher_name': self.teacher.username if self.teacher else None,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else None
+        }
+
+
+class ClassMember(db.Model):
+    """Student membership in a class."""
+    __tablename__ = 'class_members'
+
+    id = db.Column(db.Integer, primary_key=True)
+    class_id = db.Column(db.Integer, db.ForeignKey('class_rooms.id'), nullable=False, index=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    joined_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    class_room = db.relationship('ClassRoom', backref=db.backref('memberships', lazy='dynamic', cascade='all, delete-orphan'))
+    student = db.relationship('User', backref=db.backref('class_memberships', lazy='dynamic', cascade='all, delete-orphan'))
+
+    __table_args__ = (
+        db.UniqueConstraint('class_id', 'student_id', name='uq_class_member_student'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'class_id': self.class_id,
+            'class_name': self.class_room.name if self.class_room else None,
+            'student_id': self.student_id,
+            'student_name': self.student.username if self.student else None,
+            'joined_at': self.joined_at.strftime('%Y-%m-%d %H:%M') if self.joined_at else None
+        }
+
+
+class ClassJoinRequest(db.Model):
+    """Student request to join a class, reviewed by the class teacher or admin."""
+    __tablename__ = 'class_join_requests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    class_id = db.Column(db.Integer, db.ForeignKey('class_rooms.id'), nullable=False, index=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    status = db.Column(db.String(20), default='pending', nullable=False, index=True)
+    reason = db.Column(db.String(255), nullable=True)
+    review_message = db.Column(db.String(255), nullable=True)
+    reviewer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+
+    class_room = db.relationship('ClassRoom', backref=db.backref('join_requests', lazy='dynamic', cascade='all, delete-orphan'))
+    student = db.relationship('User', foreign_keys=[student_id], backref=db.backref('class_join_requests', lazy='dynamic'))
+    reviewer = db.relationship('User', foreign_keys=[reviewer_id])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'class_id': self.class_id,
+            'class_name': self.class_room.name if self.class_room else None,
+            'teacher_id': self.class_room.teacher_id if self.class_room else None,
+            'teacher_name': self.class_room.teacher.username if self.class_room and self.class_room.teacher else None,
+            'student_id': self.student_id,
+            'student_name': self.student.username if self.student else None,
+            'status': self.status,
+            'reason': self.reason,
+            'review_message': self.review_message,
+            'reviewer_id': self.reviewer_id,
+            'reviewer_name': self.reviewer.username if self.reviewer else None,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else None,
+            'reviewed_at': self.reviewed_at.strftime('%Y-%m-%d %H:%M') if self.reviewed_at else None
+        }
+
+
+class ClassMemberLog(db.Model):
+    """Audit trail for class membership changes."""
+    __tablename__ = 'class_member_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    class_id = db.Column(db.Integer, db.ForeignKey('class_rooms.id'), nullable=False, index=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    action = db.Column(db.String(30), nullable=False, index=True)
+    operator_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+    source = db.Column(db.String(30), default='manual', nullable=False)
+    details = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    class_room = db.relationship('ClassRoom', backref=db.backref('member_logs', lazy='dynamic', cascade='all, delete-orphan'))
+    student = db.relationship('User', foreign_keys=[student_id])
+    operator = db.relationship('User', foreign_keys=[operator_id])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'class_id': self.class_id,
+            'class_name': self.class_room.name if self.class_room else None,
+            'student_id': self.student_id,
+            'student_name': self.student.username if self.student else None,
+            'action': self.action,
+            'operator_id': self.operator_id,
+            'operator_name': self.operator.username if self.operator else None,
+            'source': self.source,
+            'details': self.details,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else None
+        }
+
+
+class ClassKnowledgeBase(db.Model):
+    """Knowledge base owned by a teacher and attached to a class."""
+    __tablename__ = 'class_knowledge_bases'
+
+    id = db.Column(db.Integer, primary_key=True)
+    class_id = db.Column(db.Integer, db.ForeignKey('class_rooms.id'), nullable=True, index=True)
+    class_name = db.Column(db.String(100), nullable=False, index=True)
+    knowledge_base = db.Column(db.String(100), unique=True, nullable=False)
+    teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    description = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    teacher = db.relationship('User', backref=db.backref('class_knowledge_bases', lazy='dynamic'))
+    class_room = db.relationship('ClassRoom', backref=db.backref('knowledge_bases', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'class_id': self.class_id,
+            'class_name': self.class_name,
+            'knowledge_base': self.knowledge_base,
+            'teacher_id': self.teacher_id,
+            'teacher_name': self.teacher.username if self.teacher else None,
+            'description': self.description,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else None
+        }
+
+
+class UserKnowledgeBase(db.Model):
+    """Knowledge base created by a user outside the teacher class publishing flow."""
+    __tablename__ = 'user_knowledge_bases'
+
+    id = db.Column(db.Integer, primary_key=True)
+    knowledge_base = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    owner_role = db.Column(db.String(20), default='student', nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    owner = db.relationship('User', backref=db.backref('user_knowledge_bases', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'knowledge_base': self.knowledge_base,
+            'owner_id': self.owner_id,
+            'owner_name': self.owner.username if self.owner else None,
+            'owner_role': self.owner_role,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else None
+        }
+
+
+class KnowledgeDocument(db.Model):
+    """Uploaded source document tracked for knowledge base file management."""
+    __tablename__ = 'knowledge_documents'
+
+    id = db.Column(db.Integer, primary_key=True)
+    knowledge_base = db.Column(db.String(100), nullable=False, index=True)
+    filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(255), nullable=False)
+    file_path = db.Column(db.String(500), nullable=False)
+    file_type = db.Column(db.String(20), nullable=False)
+    file_size = db.Column(db.Integer, default=0)
+    uploader_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    uploader_role = db.Column(db.String(20), default='student', nullable=False)
+    status = db.Column(db.String(20), default='pending', nullable=False, index=True)
+    parse_error = db.Column(db.Text, nullable=True)
+    vector_count = db.Column(db.Integer, default=0, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    parsed_at = db.Column(db.DateTime, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    uploader = db.relationship('User', backref=db.backref('knowledge_documents', lazy='dynamic'))
+
+    def to_dict(self, can_manage=False):
+        return {
+            'id': self.id,
+            'knowledge_base': self.knowledge_base,
+            'filename': self.filename,
+            'stored_filename': self.stored_filename,
+            'file_path': self.file_path,
+            'file_type': self.file_type,
+            'file_size': self.file_size,
+            'uploader_id': self.uploader_id,
+            'uploader_name': self.uploader.username if self.uploader else None,
+            'uploader_role': self.uploader_role,
+            'status': self.status,
+            'parse_error': self.parse_error,
+            'vector_count': self.vector_count,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else None,
+            'parsed_at': self.parsed_at.strftime('%Y-%m-%d %H:%M') if self.parsed_at else None,
+            'can_manage': can_manage
+        }
+
+
 class UserLog(db.Model):
-    """用户操作日志表"""
+    """用户操作日志表。
+
+    记录登录、登出、找回密码等安全相关行为，便于排查异常操作。
+    """
     __tablename__ = 'user_logs'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -132,6 +365,7 @@ class UserLog(db.Model):
 
     @staticmethod
     def log(user_id, action, ip_address=None, user_agent=None, details=None, status='success'):
+        """写入一条用户行为日志。"""
         log_entry = UserLog(
             user_id=user_id,
             action=action,

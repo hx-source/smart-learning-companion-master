@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
         <meta charset="UTF-8">
@@ -8,7 +8,7 @@
         <!-- 预加载关键资源 -->
         <link rel="preload" href="/static/css/style.css" as="style">
         <!-- 懒加载非关键资源 -->
-        <script defer src="/static/js/shared.js"></script>
+        <script defer src="/static/js/shared.js?v=fix-text-20260612"></script>
     </head>
 <body>
     <!-- 导航栏 -->
@@ -63,13 +63,9 @@
                                     <span class="kb-toggle-status" id="kbToggleStatus">关闭</span>
                                     <div class="kb-selector" id="kbSelector" style="display: none;">
                                         <select id="knowledgeBaseSelect" onchange="saveKnowledgeBasePreference()">
-                                            <option value="default">默认知识库</option>
+                                            <option value="">暂无知识库</option>
                                         </select>
                                     </div>
-                                </div>
-                                <div class="model-switch">
-                                    <button class="switch-btn active" id="apiBtn" onclick="switchModel('api')">🌐 API</button>
-                                    <button class="switch-btn" id="ollamaBtn" onclick="switchModel('ollama')">💻 本地</button>
                                 </div>
                             </div>
                         </div>
@@ -91,106 +87,6 @@
                         <div class="chat-input-area">
                             <input type="text" class="chat-input" id="questionInput" placeholder="输入你的学习问题..." onkeypress="handleKeyPress(event)">
                             <button class="chat-send-btn" onclick="sendQuestion()">发送</button>
-                        </div>
-                    </div>
-                </main>
-            </div>
-
-            <!-- 知识库页面 -->
-            <div id="knowledgePage" class="page" style="display: none;">
-                <main class="knowledge-page">
-                    <h1 class="page-title">知识库管理</h1>
-                    
-                    <!-- 知识库选择器 -->
-                    <div class="knowledge-base-selector">
-                        <label for="kbKnowledgeBaseSelect">选择知识库：</label>
-                        <select id="kbKnowledgeBaseSelect" onchange="kbSwitchKnowledgeBase()">
-                            <option value="default">默认知识库</option>
-                        </select>
-                        <button class="btn-primary small" onclick="kbCreateKnowledgeBase()">创建知识库</button>
-                        <button class="btn-secondary small" onclick="kbRenameKnowledgeBase()">重命名</button>
-                        <button class="btn-danger small" onclick="kbDeleteKnowledgeBase()">删除</button>
-                    </div>
-
-                    <!-- 统计信息卡片 -->
-                    <div class="stats-cards">
-                        <div class="stat-card">
-                            <div class="stat-icon">📄</div>
-                            <div class="stat-info">
-                                <div class="stat-value" id="kbTotalDocuments">-</div>
-                                <div class="stat-label">文档数量</div>
-                            </div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon">🧩</div>
-                            <div class="stat-info">
-                                <div class="stat-value" id="kbTotalVectors">-</div>
-                                <div class="stat-label">向量数量</div>
-                            </div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon">📊</div>
-                            <div class="stat-info">
-                                <div class="stat-value" id="kbVectorDimension">-</div>
-                                <div class="stat-label">向量维度</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 文件上传区域 -->
-                    <div class="upload-section">
-                        <div class="section-header">
-                            <h3>📤 上传文档</h3>
-                            <p class="section-desc">支持 PDF、TXT、DOCX 格式，文件将自动解析并添加到知识库</p>
-                        </div>
-                        <div class="upload-area" id="kbUploadArea">
-                            <div class="upload-icon">📁</div>
-                            <div class="upload-text">
-                                <p>拖拽文件到此处，或 <span class="upload-link">点击上传</span></p>
-                                <p class="upload-hint">支持 PDF、TXT、DOCX 格式，单个文件最大 100MB</p>
-                            </div>
-                            <input type="file" id="kbFileInput" accept=".pdf,.txt,.docx" multiple style="display: none;">
-                        </div>
-                        <div class="upload-progress" id="kbUploadProgress" style="display: none;">
-                            <div class="progress-bar">
-                                <div class="progress-fill" id="kbProgressFill"></div>
-                            </div>
-                            <span class="progress-text" id="kbProgressText">0%</span>
-                        </div>
-                        <div class="upload-status" id="kbUploadStatus"></div>
-                    </div>
-
-                    <!-- 文件分类管理 -->
-                    <div class="sources-section">
-                        <div class="section-header">
-                            <h3>📁 文件来源管理</h3>
-                            <p class="section-desc">按文件来源分类管理向量数据</p>
-                        </div>
-                        <div class="sources-filter">
-                            <input type="text" id="kbSourceFilter" placeholder="搜索文件名..." oninput="kbFilterSources()">
-                        </div>
-                        <div class="sources-list" id="kbSourcesList">
-                            <div class="loading">
-                                <div class="loading-dots"><span></span><span></span><span></span></div>
-                                <div>加载中...</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 向量列表 -->
-                    <div class="vectors-section">
-                        <div class="section-header">
-                            <h3>🧩 向量列表</h3>
-                            <p class="section-desc">显示知识库中的所有向量信息</p>
-                        </div>
-                        <div class="vectors-list" id="kbVectorsList">
-                            <div class="loading">
-                                <div class="loading-dots"><span></span><span></span><span></span></div>
-                                <div>加载中...</div>
-                            </div>
-                        </div>
-                        <div class="vectors-pagination" id="kbVectorsPagination">
-                            <!-- 动态生成 -->
                         </div>
                     </div>
                 </main>
@@ -225,23 +121,6 @@
                                 <span class="btn-icon">🔒</span>
                                 修改密码
                             </button>
-                            <div class="dropdown">
-                                <button class="action-btn dropdown-toggle">
-                                    <span class="btn-icon">🔑</span>
-                                    API密钥管理
-                                </button>
-                                <div class="dropdown-menu">
-                                    <a href="javascript:void(0)" onclick="editApiKeys('deepseek')">
-                                        <span class="menu-icon">🔗</span> DeepSeek
-                                    </a>
-                                    <a href="javascript:void(0)" onclick="editApiKeys('kimi')">
-                                        <span class="menu-icon">🔗</span> Kimi 32K
-                                    </a>
-                                    <a href="javascript:void(0)" onclick="editApiKeys('zhipu')">
-                                        <span class="menu-icon">🔗</span> GLM-4-Flash
-                                    </a>
-                                </div>
-                            </div>
                         </div>
                     </div>
                 </main>
@@ -313,53 +192,16 @@
         </div>
     </div>
 
-    <!-- API密钥管理弹窗 -->
-    <div class="modal" id="apiKeysModal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>API密钥管理</h3>
-                <button class="close-btn" onclick="closeApiKeysModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <form id="apiKeysForm">
-                    <div class="form-group" id="deepseekGroup">
-                        <label>DeepSeek API密钥</label>
-                        <input type="text" id="deepseekApiKey" placeholder="sk-...">
-                    </div>
-                    <div class="form-group" id="kimiGroup">
-                        <label>Kimi API密钥</label>
-                        <input type="text" id="kimiApiKey" placeholder="your-api-key-here">
-                    </div>
-                    <div class="form-group" id="zhipuGroup">
-                        <label>智谱AI API密钥</label>
-                        <input type="text" id="zhipuApiKey" placeholder="your-api-key-here">
-                    </div>
-
-                    <div class="form-actions">
-                        <button type="button" class="btn cancel" onclick="closeApiKeysModal()">取消</button>
-                        <button type="submit" class="btn submit">保存</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
     <script>
         // 页面管理
         const pages = {
             home: document.getElementById('homePage'),
-            knowledge: document.getElementById('knowledgePage'),
             profile: document.getElementById('profilePage')
         };
 
         // 页面内容缓存
         const pageCache = {
             home: { 
-                loaded: false, 
-                timestamp: 0,
-                data: null
-            },
-            knowledge: { 
                 loaded: false, 
                 timestamp: 0,
                 data: null
@@ -373,6 +215,11 @@
 
         // 切换页面
         function switchPage(pageName) {
+            if (pageName === 'knowledge') {
+                window.location.href = '/knowledge-base';
+                return;
+            }
+
             // 记录开始时间
             const startTime = performance.now();
             
@@ -403,8 +250,6 @@
             
             if (pageName === 'home') {
                 targetNavItem = document.querySelector('.nav-item[href="/"]');
-            } else if (pageName === 'knowledge') {
-                targetNavItem = document.querySelector('.nav-item[href="/knowledge-base"]');
             } else if (pageName === 'profile') {
                 targetNavItem = document.querySelector('.nav-item[href="/profile"]');
             }
@@ -446,9 +291,6 @@
                 switch (pageName) {
                     case 'home':
                         cache.data = await loadHomeContent();
-                        break;
-                    case 'knowledge':
-                        cache.data = await loadKnowledgeContent();
                         break;
                     case 'profile':
                         cache.data = await loadProfileContent();
@@ -499,30 +341,6 @@
             }
         }
 
-        // 加载知识库页面内容
-        async function loadKnowledgeContent() {
-            // 加载知识库列表
-            if (typeof kbLoadKnowledgeBases === 'function') {
-                await kbLoadKnowledgeBases();
-            }
-            // 加载统计信息
-            if (typeof kbLoadStats === 'function') {
-                await kbLoadStats();
-            }
-            // 加载文件来源
-            if (typeof kbLoadSources === 'function') {
-                await kbLoadSources();
-            }
-            // 加载向量列表
-            if (typeof kbLoadVectors === 'function') {
-                await kbLoadVectors();
-            }
-            // 初始化上传区域
-            if (typeof kbInitUploadArea === 'function') {
-                kbInitUploadArea();
-            }
-        }
-
         // 加载个人中心页面内容
         async function loadProfileContent() {
             // 加载用户信息
@@ -557,16 +375,12 @@
                     const href = this.getAttribute('href');
                     
                     // 如果是个人中心链接，不阻止默认行为，直接跳转
-                    if (href === '/profile') {
+                    if (href === '/profile' || href === '/knowledge-base' || href === '/admin') {
                         return;
                     }
                     
                     e.preventDefault();
                     let pageName = 'home';
-                    
-                    if (href === '/knowledge-base') {
-                        pageName = 'knowledge';
-                    }
                     
                     switchPage(pageName);
                 });
@@ -587,9 +401,13 @@
 
         // 首页相关变量
         let currentSessionId = null;
-        let currentModelType = 'api';
+        let currentModelType = 'ollama';
         let knowledgeBaseEnabled = false;
-        let currentKnowledgeBase = 'default';
+        let currentKnowledgeBase = '';
+
+        function getKnowledgeBaseDisplayName(item) {
+            return item.display_name || item.class_name || item.name;
+        }
 
         // 加载所有知识库列表
         async function loadKnowledgeBases() {
@@ -603,17 +421,35 @@
                 const data = await response.json();
                 
                 if (data.code === 200) {
+                    const availableKnowledgeBases = data.items || [];
+                    if (!availableKnowledgeBases.some(kb => kb.name === currentKnowledgeBase)) {
+                        currentKnowledgeBase = availableKnowledgeBases[0]?.name || '';
+                        if (currentKnowledgeBase) {
+                            localStorage.setItem('currentKnowledgeBase', currentKnowledgeBase);
+                        } else {
+                            localStorage.removeItem('currentKnowledgeBase');
+                        }
+                    }
+
                     const select = document.getElementById('knowledgeBaseSelect');
                     if (select) {
                         // 清空现有选项
                         select.innerHTML = '';
-                        
-                        // 添加所有知识库选项
-                        data.data.forEach(kb => {
+
+                        if (!availableKnowledgeBases.length) {
                             const option = document.createElement('option');
-                            option.value = kb;
-                            option.textContent = kb;
-                            if (kb === currentKnowledgeBase) {
+                            option.value = '';
+                            option.textContent = '暂无知识库';
+                            option.selected = true;
+                            select.appendChild(option);
+                        }
+
+                        // 添加所有知识库选项
+                        availableKnowledgeBases.forEach(kb => {
+                            const option = document.createElement('option');
+                            option.value = kb.name;
+                            option.textContent = getKnowledgeBaseDisplayName(kb);
+                            if (kb.name === currentKnowledgeBase) {
                                 option.selected = true;
                             }
                             select.appendChild(option);
@@ -632,740 +468,6 @@
                 currentKnowledgeBase = select.value;
                 localStorage.setItem('currentKnowledgeBase', currentKnowledgeBase);
             }
-        }
-
-        // 知识库页面相关变量
-        let kbCurrentPage = 1;
-        const kbPageSize = 10;
-        let kbCurrentKnowledgeBase = 'default';
-
-        // 加载所有知识库列表（知识库页面）
-        async function kbLoadKnowledgeBases() {
-            try {
-                const token = localStorage.getItem('token') || getCookie('token');
-                const response = await fetch('/api/knowledge-base/list', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                const data = await response.json();
-                
-                if (data.code === 200) {
-                    const select = document.getElementById('kbKnowledgeBaseSelect');
-                    if (select) {
-                        // 清空现有选项
-                        select.innerHTML = '';
-                        
-                        // 添加所有知识库选项
-                        data.data.forEach(kb => {
-                            const option = document.createElement('option');
-                            option.value = kb;
-                            option.textContent = kb;
-                            if (kb === kbCurrentKnowledgeBase) {
-                                option.selected = true;
-                            }
-                            select.appendChild(option);
-                        });
-                    }
-                    
-                    // 同时更新首页答疑页面的知识库下拉框
-                    const mainSelect = document.getElementById('knowledgeBaseSelect');
-                    if (mainSelect) {
-                        const previousValue = mainSelect.value;
-                        mainSelect.innerHTML = '';
-                        
-                        data.data.forEach(kb => {
-                            const option = document.createElement('option');
-                            option.value = kb;
-                            option.textContent = kb;
-                            if (kb === previousValue) {
-                                option.selected = true;
-                            }
-                            mainSelect.appendChild(option);
-                        });
-                    }
-                }
-            } catch (error) {
-                console.error('加载知识库列表失败:', error);
-            }
-        }
-        
-        // 切换知识库（知识库页面）
-        function kbSwitchKnowledgeBase() {
-            const select = document.getElementById('kbKnowledgeBaseSelect');
-            if (select) {
-                kbCurrentKnowledgeBase = select.value;
-                // 重新加载数据
-                kbLoadStats();
-                kbLoadSources();
-                kbLoadVectors();
-            }
-        }
-        
-        // 创建知识库（知识库页面）
-        function kbCreateKnowledgeBase() {
-            const name = prompt('请输入知识库名称:');
-            if (name && name.trim()) {
-                // 验证知识库名称
-                if (name.includes('/') || name.includes('\\') || name.includes('.')) {
-                    alert('知识库名称不能包含斜杠或点号');
-                    return;
-                }
-                
-                // 初始化新知识库
-                try {
-                    const token = localStorage.getItem('token') || getCookie('token');
-                    // 从cookie中获取CSRF令牌
-                    const csrfToken = getCookie('csrf_token');
-                    
-                    // 发送请求到服务器，创建新知识库
-                    fetch('/api/knowledge-base/create', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`,
-                            'X-CSRF-Token': csrfToken
-                        },
-                        body: JSON.stringify({
-                            name: name
-                        })
-                    }).then(response => response.json()).then(data => {
-                        if (data.code === 200) {
-                            // 重新加载知识库列表
-                            kbLoadKnowledgeBases();
-                            // 选择新创建的知识库
-                            setTimeout(() => {
-                                const select = document.getElementById('kbKnowledgeBaseSelect');
-                                if (select) {
-                                    select.value = name;
-                                    kbSwitchKnowledgeBase();
-                                }
-                            }, 100);
-                        } else {
-                            alert('创建知识库失败: ' + data.msg);
-                        }
-                    });
-                } catch (error) {
-                    console.error('创建知识库失败:', error);
-                    alert('创建知识库失败: ' + error.message);
-                }
-            }
-        }
-        
-        // 删除知识库（知识库页面）
-        async function kbDeleteKnowledgeBase() {
-            const select = document.getElementById('kbKnowledgeBaseSelect');
-            if (!select) return;
-            
-            const knowledgeBase = select.value;
-            
-            // 不允许删除默认知识库
-            if (knowledgeBase === 'default') {
-                alert('不能删除默认知识库');
-                return;
-            }
-            
-            if (!confirm(`确定要删除知识库 "${knowledgeBase}" 吗？此操作不可恢复！`)) {
-                return;
-            }
-            
-            try {
-                const token = localStorage.getItem('token') || getCookie('token');
-                // 从cookie中获取CSRF令牌
-                const csrfToken = getCookie('csrf_token');
-                
-                const response = await fetch(`/api/knowledge-base/delete?knowledge_base=${encodeURIComponent(knowledgeBase)}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'X-CSRF-Token': csrfToken
-                    }
-                });
-                
-                const data = await response.json();
-                if (data.code === 200) {
-                    kbShowStatus(`✅ 知识库 "${knowledgeBase}" 已删除`, 'success');
-                    // 重新加载知识库列表
-                    kbLoadKnowledgeBases();
-                    // 切换到默认知识库
-                    setTimeout(() => {
-                        const select = document.getElementById('kbKnowledgeBaseSelect');
-                        if (select) {
-                            select.value = 'default';
-                            kbSwitchKnowledgeBase();
-                        }
-                    }, 100);
-                } else {
-                    alert('删除失败: ' + data.msg);
-                }
-            } catch (error) {
-                console.error('删除知识库失败:', error);
-                alert('删除知识库失败: ' + error.message);
-            }
-        }
-        
-        // 重命名知识库（知识库页面）
-        async function kbRenameKnowledgeBase() {
-            const select = document.getElementById('kbKnowledgeBaseSelect');
-            if (!select) return;
-            
-            const oldName = select.value;
-            
-            // 不允许重命名默认知识库
-            if (oldName === 'default') {
-                alert('不能重命名默认知识库');
-                return;
-            }
-            
-            const newName = prompt('请输入新的知识库名称:', oldName);
-            if (!newName || !newName.trim()) {
-                return;
-            }
-            
-            // 验证新知识库名称
-            if (newName.includes('/') || newName.includes('\\') || newName.includes('.')) {
-                alert('知识库名称不能包含斜杠或点号');
-                return;
-            }
-            
-            if (newName === oldName) {
-                return;
-            }
-            
-            try {
-                const token = localStorage.getItem('token') || getCookie('token');
-                // 从cookie中获取CSRF令牌
-                const csrfToken = getCookie('csrf_token');
-                
-                const response = await fetch('/api/knowledge-base/rename', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`,
-                        'X-CSRF-Token': csrfToken
-                    },
-                    body: JSON.stringify({
-                        old_name: oldName,
-                        new_name: newName
-                    })
-                });
-                
-                const data = await response.json();
-                if (data.code === 200) {
-                    kbShowStatus(`✅ 知识库 "${oldName}" 已重命名为 "${newName}"`, 'success');
-                    // 重新加载知识库列表
-                    kbLoadKnowledgeBases();
-                    // 切换到重命名后的知识库
-                    setTimeout(() => {
-                        const select = document.getElementById('kbKnowledgeBaseSelect');
-                        if (select) {
-                            select.value = newName;
-                            kbSwitchKnowledgeBase();
-                        }
-                    }, 100);
-                } else {
-                    alert('重命名失败: ' + data.msg);
-                }
-            } catch (error) {
-                console.error('重命名知识库失败:', error);
-                alert('重命名知识库失败: ' + error.message);
-            }
-        }
-
-        // 加载文件来源列表（知识库页面）
-        async function kbLoadSources() {
-            const sourcesList = document.getElementById('kbSourcesList');
-            if (!sourcesList) return;
-            
-            try {
-                sourcesList.innerHTML = `
-                    <div class="loading">
-                        <div class="loading-dots"><span></span><span></span><span></span></div>
-                        <div>加载中...</div>
-                    </div>
-                `;
-                
-                const token = localStorage.getItem('token') || getCookie('token');
-                const response = await fetch(`/api/knowledge-base/sources?knowledge_base=${encodeURIComponent(kbCurrentKnowledgeBase)}`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                const data = await response.json();
-                
-                if (data.code === 200) {
-                    kbDisplaySources(data.data);
-                } else {
-                    sourcesList.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-icon">❌</div>
-                            <div>加载文件来源失败: ${data.msg}</div>
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                sourcesList.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-icon">❌</div>
-                        <div>加载文件来源出错: ${error.message}</div>
-                    </div>
-                `;
-            }
-        }
-        
-        // 显示文件来源列表（知识库页面）
-        function kbDisplaySources(sources) {
-            const sourcesList = document.getElementById('kbSourcesList');
-            if (!sourcesList) return;
-            
-            if (!sources || sources.length === 0) {
-                sourcesList.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-icon">📁</div>
-                        <div>暂无文件来源</div>
-                    </div>
-                `;
-                return;
-            }
-            
-            // 清空容器
-            sourcesList.innerHTML = '';
-            
-            // 为每个来源创建元素
-            sources.forEach(source => {
-                const sourceItem = document.createElement('div');
-                sourceItem.className = 'source-item';
-                
-                sourceItem.innerHTML = `
-                    <div class="source-info">
-                        <div class="source-name">${source.file_name}</div>
-                        <div class="source-stats">
-                            <span class="vector-count">${source.vector_count} 个向量</span>
-                            <span class="source-path">${source.file_path}</span>
-                        </div>
-                    </div>
-                    <div class="source-actions">
-                        <button class="btn-secondary small">查看向量</button>
-                        <button class="btn-danger small">删除</button>
-                    </div>
-                `;
-                
-                // 添加事件监听器
-                const viewBtn = sourceItem.querySelector('.btn-secondary');
-                const deleteBtn = sourceItem.querySelector('.btn-danger');
-                
-                viewBtn.addEventListener('click', () => kbViewSourceVectors(source.file_path));
-                deleteBtn.addEventListener('click', () => kbDeleteSource(source.file_path));
-                
-                sourcesList.appendChild(sourceItem);
-            });
-        }
-        
-        // 按文件名筛选文件来源（知识库页面）
-        function kbFilterSources() {
-            const filter = document.getElementById('kbSourceFilter').value.toLowerCase();
-            const sourceItems = document.querySelectorAll('.source-item');
-            
-            sourceItems.forEach(item => {
-                const fileName = item.querySelector('.source-name').textContent.toLowerCase();
-                const filePath = item.querySelector('.source-path').textContent.toLowerCase();
-                
-                if (fileName.includes(filter) || filePath.includes(filter)) {
-                    item.style.display = 'flex';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
-        }
-        
-        // 查看文件来源的向量（知识库页面）
-        function kbViewSourceVectors(filePath) {
-            // 编码文件路径
-            const encodedPath = encodeURIComponent(filePath);
-            // 加载该文件的向量数据
-            kbLoadVectors(1, 10, encodedPath);
-        }
-        
-        // 删除文件来源（知识库页面）
-        function kbDeleteSource(filePath) {
-            if (!confirm(`确定要删除文件 "${filePath}" 的所有向量数据吗？此操作不可恢复！`)) {
-                return;
-            }
-            
-            // 编码文件路径
-            const encodedPath = encodeURIComponent(filePath);
-            
-            try {
-                const token = localStorage.getItem('token') || getCookie('token');
-                fetch(`/api/knowledge-base/sources/${encodedPath}?knowledge_base=${encodeURIComponent(kbCurrentKnowledgeBase)}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.code === 200) {
-                        kbShowStatus(`成功删除 ${data.data.deleted_count} 个向量`, 'success');
-                        // 重新加载文件来源列表和统计信息
-                        kbLoadSources();
-                        kbLoadStats();
-                        // 重新加载向量列表（清空当前筛选）
-                        kbLoadVectors();
-                    } else {
-                        kbShowStatus(`删除失败: ${data.msg}`, 'error');
-                    }
-                })
-                .catch(error => {
-                    kbShowStatus(`删除出错: ${error.message}`, 'error');
-                });
-            } catch (error) {
-                kbShowStatus(`删除出错: ${error.message}`, 'error');
-            }
-        }
-        
-        // 保存当前的source参数（知识库页面）
-        let kbCurrentSource = null;
-        
-        // 加载向量列表（知识库页面）
-        async function kbLoadVectors(page = 1, pageSize = 10, source = null) {
-            const vectorsList = document.getElementById('kbVectorsList');
-            const vectorsPagination = document.getElementById('kbVectorsPagination');
-            
-            // 保存当前的source
-            kbCurrentSource = source;
-            
-            try {
-                // 显示加载状态
-                vectorsList.innerHTML = `
-                    <div class="loading">
-                        <div class="loading-dots"><span></span><span></span><span></span></div>
-                        <div>加载中...</div>
-                    </div>
-                `;
-                
-                const token = localStorage.getItem('token') || getCookie('token');
-                let url = `/api/knowledge-base/vectors?page=${page}&page_size=${pageSize}&knowledge_base=${encodeURIComponent(kbCurrentKnowledgeBase)}`;
-                if (source) {
-                    url += `&source=${source}`;
-                }
-                
-                const response = await fetch(url, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                const data = await response.json();
-                
-                if (data.code === 200) {
-                    kbDisplayVectors(data.data, source);
-                    kbDisplayPagination(data.data, page, pageSize, source);
-                } else {
-                    vectorsList.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-icon">❌</div>
-                            <div>加载向量失败: ${data.msg}</div>
-                        </div>
-                    `;
-                    vectorsPagination.innerHTML = '';
-                }
-            } catch (error) {
-                vectorsList.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-icon">❌</div>
-                        <div>加载向量出错: ${error.message}</div>
-                    </div>
-                `;
-                vectorsPagination.innerHTML = '';
-            }
-        }
-        
-        // 查看全部向量（知识库页面）
-        function kbViewAllVectors() {
-            kbLoadVectors(1, 10, null);
-        }
-        
-        // 显示向量列表（知识库页面）
-        function kbDisplayVectors(data, source) {
-            const vectorsList = document.getElementById('kbVectorsList');
-
-            if (!data || !data.items || data.items.length === 0) {
-                vectorsList.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-icon">🧩</div>
-                        <div>暂无向量数据</div>
-                    </div>
-                `;
-                return;
-            }
-
-            // 构建向量列表
-            let vectorsHTML = '';
-            
-            // 如果有source参数，添加"查看全部向量"按钮
-            if (source) {
-                vectorsHTML = `
-                    <div class="view-all-vectors">
-                        <button class="btn-secondary small" onclick="kbViewAllVectors()">查看全部向量</button>
-                    </div>
-                `;
-            }
-            
-            vectorsHTML += data.items.map((vector, index) => {
-                const content = vector.content || '';
-                const truncatedContent = content.length > 100 ? content.substring(0, 100) + '...' : content;
-                return `
-                    <div class="vector-item">
-                        <div class="vector-header">
-                            <span class="vector-index">#${(data.page - 1) * data.page_size + index + 1}</span>
-                            <span class="vector-source">${vector.source || '未知来源'}</span>
-                        </div>
-                        <div class="vector-content">
-                            ${truncatedContent}
-                        </div>
-                        <div class="vector-meta">
-                            <span class="vector-chunk">片段: ${vector.chunk_index || 0}</span>
-                            <button class="btn-small" data-vector='${JSON.stringify(vector).replace(/'/g, "&#39;")}'><</button>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-            
-            vectorsList.innerHTML = vectorsHTML;
-            
-            // 添加事件监听器
-            document.querySelectorAll('.vector-item .btn-small').forEach(button => {
-                button.addEventListener('click', function() {
-                    const vector = JSON.parse(this.getAttribute('data-vector'));
-                    kbShowVectorDetails(vector);
-                });
-            });
-        }
-        
-        // 显示向量详情（知识库页面）
-        function kbShowVectorDetails(vector) {
-            const content = vector.content || '';
-            const metadata = vector.metadata || {};
-            
-            let detailsHTML = `
-                <div class="vector-details">
-                    <h4>向量详情</h4>
-                    <div class="detail-item">
-                        <label>来源:</label>
-                        <span>${vector.source || '未知来源'}</span>
-                    </div>
-                    <div class="detail-item">
-                        <label>片段索引:</label>
-                        <span>${vector.chunk_index || 0}</span>
-                    </div>
-                    <div class="detail-item">
-                        <label>内容:</label>
-                        <div class="detail-content">${content}</div>
-                    </div>
-                    <div class="detail-item">
-                        <label>元数据:</label>
-                        <div class="detail-content">${JSON.stringify(metadata, null, 2)}</div>
-                    </div>
-                </div>
-            `;
-
-            // 创建模态框
-            const modal = document.createElement('div');
-            modal.className = 'modal active';
-            modal.innerHTML = `
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h3>向量详情</h3>
-                        <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
-                    </div>
-                    <div class="modal-body">
-                        ${detailsHTML}
-                    </div>
-                    <div class="modal-footer">
-                        <button class="btn-secondary" onclick="this.closest('.modal').remove()">关闭</button>
-                    </div>
-                </div>
-            `;
-
-            document.body.appendChild(modal);
-        }
-        
-        // 显示分页（知识库页面）
-        function kbDisplayPagination(data, currentPage, pageSize, source = null) {
-            const vectorsPagination = document.getElementById('kbVectorsPagination');
-            const totalPages = Math.ceil(data.total / pageSize);
-            
-            if (totalPages <= 1) {
-                vectorsPagination.innerHTML = '';
-                return;
-            }
-            
-            let paginationHTML = `
-                <div class="pagination">
-                    <button class="pagination-btn ${currentPage === 1 ? 'disabled' : ''}" onclick="kbLoadVectors(${currentPage - 1}, ${pageSize}, ${source ? `'${source}'` : 'null'})">&laquo;</button>
-            `;
-            
-            // 显示页码
-            for (let i = 1; i <= totalPages; i++) {
-                if (i <= 3 || i >= totalPages - 2 || (i >= currentPage - 1 && i <= currentPage + 1)) {
-                    paginationHTML += `
-                        <button class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="kbLoadVectors(${i}, ${pageSize}, ${source ? `'${source}'` : 'null'})"><span>${i}</span></button>
-                    `;
-                } else if (i === 4 || i === totalPages - 3) {
-                    paginationHTML += `<span class="pagination-ellipsis">...</span>`;
-                }
-            }
-            
-            paginationHTML += `
-                    <button class="pagination-btn ${currentPage === totalPages ? 'disabled' : ''}" onclick="kbLoadVectors(${currentPage + 1}, ${pageSize}, ${source ? `'${source}'` : 'null'})">&raquo;</button>
-                </div>
-            `;
-            
-            vectorsPagination.innerHTML = paginationHTML;
-        }
-
-        // 加载统计信息（知识库页面）
-        async function kbLoadStats() {
-            try {
-                const token = localStorage.getItem('token') || getCookie('token');
-                const response = await fetch(`/api/knowledge-base/stats?knowledge_base=${encodeURIComponent(kbCurrentKnowledgeBase)}`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                const data = await response.json();
-
-                if (data.code === 200) {
-                    document.getElementById('kbTotalDocuments').textContent = data.data.total_documents;
-                    document.getElementById('kbTotalVectors').textContent = data.data.total_vectors;
-                    document.getElementById('kbVectorDimension').textContent = data.data.vector_dimension;
-                }
-            } catch (error) {
-                console.error('加载统计信息失败:', error);
-            }
-        }
-
-        // 初始化上传区域（知识库页面）
-        function kbInitUploadArea() {
-            const uploadArea = document.getElementById('kbUploadArea');
-            const fileInput = document.getElementById('kbFileInput');
-
-            if (!uploadArea || !fileInput) return;
-
-            // 点击上传
-            uploadArea.addEventListener('click', () => fileInput.click());
-
-            // 文件选择
-            fileInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    kbHandleFiles(e.target.files);
-                }
-            });
-
-            // 拖拽上传
-            uploadArea.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                uploadArea.classList.add('dragover');
-            });
-
-            uploadArea.addEventListener('dragleave', () => {
-                uploadArea.classList.remove('dragover');
-            });
-
-            uploadArea.addEventListener('drop', (e) => {
-                e.preventDefault();
-                uploadArea.classList.remove('dragover');
-                if (e.dataTransfer.files.length > 0) {
-                    kbHandleFiles(e.dataTransfer.files);
-                }
-            });
-        }
-
-        // 处理文件上传（知识库页面）
-        async function kbHandleFiles(files) {
-            const uploadProgress = document.getElementById('kbUploadProgress');
-            const progressFill = document.getElementById('kbProgressFill');
-            const progressText = document.getElementById('kbProgressText');
-            const fileInput = document.getElementById('kbFileInput');
-
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-
-                // 检查文件类型
-                const allowedExtensions = ['.pdf', '.txt', '.docx'];
-                const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-
-                if (!allowedExtensions.includes(fileExt)) {
-                    kbShowStatus(`不支持的文件格式: ${file.name}`, 'error');
-                    continue;
-                }
-
-                // 显示进度条
-                uploadProgress.style.display = 'flex';
-                kbUpdateProgress(0);
-
-                const formData = new FormData();
-                formData.append('file', file);
-                formData.append('knowledge_base', kbCurrentKnowledgeBase);
-
-                try {
-                    kbUpdateProgress(30);
-                    const token = localStorage.getItem('token') || getCookie('token');
-                    const response = await fetch('/api/knowledge-base/upload', {
-                        method: 'POST',
-                        body: formData,
-                        headers: {
-                            'Authorization': `Bearer ${token}`
-                        }
-                    });
-                    kbUpdateProgress(70);
-
-                    const data = await response.json();
-                    kbUpdateProgress(100);
-
-                    if (data.code === 200) {
-                        kbShowStatus(`✅ ${file.name} 上传成功`, 'success');
-                        kbLoadStats(); // 刷新统计
-                        kbLoadSources(); // 刷新文件来源列表
-                        kbLoadVectors(); // 刷新向量列表
-                    } else {
-                        kbShowStatus(`❌ ${file.name} 上传失败: ${data.msg}`, 'error');
-                    }
-                } catch (error) {
-                    kbShowStatus(`❌ ${file.name} 上传出错: ${error.message}`, 'error');
-                }
-
-                // 延迟隐藏进度条
-                setTimeout(() => {
-                    uploadProgress.style.display = 'none';
-                }, 1000);
-            }
-            
-            // 重置文件输入框，允许再次选择同一文件
-            fileInput.value = '';
-        }
-
-        // 更新进度条（知识库页面）
-        function kbUpdateProgress(percent) {
-            document.getElementById('kbProgressFill').style.width = percent + '%';
-            document.getElementById('kbProgressText').textContent = percent + '%';
-        }
-
-        // 显示状态消息（知识库页面）
-        function kbShowStatus(message, type = 'info') {
-            const uploadStatus = document.getElementById('kbUploadStatus');
-            if (!uploadStatus) return;
-
-            uploadStatus.innerHTML = `
-                <div class="status-message ${type}">
-                    ${message}
-                </div>
-            `;
-
-            // 3秒后自动隐藏
-            setTimeout(() => {
-                uploadStatus.innerHTML = '';
-            }, 3000);
         }
 
         // 个人中心页面相关函数
@@ -1450,56 +552,6 @@
         function closePasswordModal() {
             document.getElementById('passwordModal').style.display = 'none';
         }
-
-        async function editApiKeys(modelType) {
-            // 首先隐藏所有API密钥输入框
-            const groups = ['deepseekGroup', 'kimiGroup', 'zhipuGroup'];
-            groups.forEach(groupId => {
-                const element = document.getElementById(groupId);
-                if (element) {
-                    element.style.display = 'none';
-                }
-            });
-            
-            try {
-                const token = localStorage.getItem('token');
-                
-                const response = await fetch('/api/auth/api-keys', {
-                    method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                const apiKeys = await response.json();
-                if (apiKeys.code === 200) {
-                    document.getElementById('deepseekApiKey').value = apiKeys.deepseek_api_key || '';
-                    document.getElementById('kimiApiKey').value = apiKeys.kimi_api_key || '';
-                    document.getElementById('zhipuApiKey').value = apiKeys.zhipu_api_key || '';
-                }
-            } catch (error) {
-                console.error('加载API密钥配置失败:', error);
-            }
-            
-            // 根据模型类型显示对应的输入框
-            if (modelType === 'deepseek') {
-                document.getElementById('deepseekGroup').style.display = 'block';
-                setTimeout(() => document.getElementById('deepseekApiKey').focus(), 100);
-            } else if (modelType === 'kimi') {
-                document.getElementById('kimiGroup').style.display = 'block';
-                setTimeout(() => document.getElementById('kimiApiKey').focus(), 100);
-            } else if (modelType === 'zhipu') {
-                document.getElementById('zhipuGroup').style.display = 'block';
-                setTimeout(() => document.getElementById('zhipuApiKey').focus(), 100);
-            }
-            
-            document.getElementById('apiKeysModal').style.display = 'block';
-        }
-
-        function closeApiKeysModal() {
-            document.getElementById('apiKeysModal').style.display = 'none';
-        }
-
         // 编辑资料表单提交
         document.getElementById('editForm').addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -1640,49 +692,10 @@
                 alert('网络错误，请稍后重试');
             }
         });
-
-        // API密钥管理表单提交
-        document.getElementById('apiKeysForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            const data = {
-                deepseek_api_key: document.getElementById('deepseekApiKey').value,
-                kimi_api_key: document.getElementById('kimiApiKey').value,
-                zhipu_api_key: document.getElementById('zhipuApiKey').value
-            };
-
-            try {
-                const token = localStorage.getItem('token');
-                // 从cookie中获取CSRF令牌
-                const csrfToken = getCookie('csrf_token');
-                
-                const response = await fetch('/api/auth/api-keys', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`,
-                        'X-CSRF-Token': csrfToken
-                    },
-                    body: JSON.stringify(data)
-                });
-                const result = await response.json();
-                
-                if (result.message === 'API密钥配置已更新') {
-                    closeApiKeysModal();
-                    alert('API密钥配置已更新');
-                } else {
-                    alert('更新失败: ' + (result.error || '未知错误'));
-                }
-            } catch (error) {
-                alert('网络错误，请稍后重试');
-            }
-        });
-
         // 点击模态框外部关闭
         window.onclick = function(event) {
             const editModal = document.getElementById('editModal');
             const passwordModal = document.getElementById('passwordModal');
-            const apiKeysModal = document.getElementById('apiKeysModal');
             
             if (event.target === editModal) {
                 editModal.style.display = 'none';
@@ -1690,10 +703,8 @@
             if (event.target === passwordModal) {
                 passwordModal.style.display = 'none';
             }
-            if (event.target === apiKeysModal) {
-                apiKeysModal.style.display = 'none';
-            }
         }
     </script>
 </body>
 </html>
+

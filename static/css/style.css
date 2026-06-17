@@ -322,6 +322,54 @@ body {
     box-shadow: 0 2px 8px rgba(0,0,0,0.04);
 }
 
+.stream-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #64748b;
+    font-size: 14px;
+}
+
+.answer-sources {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid #e5e7eb;
+    font-size: 13px;
+}
+
+.answer-sources-title {
+    font-weight: 700;
+    color: #334155;
+    margin-bottom: 8px;
+}
+
+.answer-source-item {
+    padding: 8px 0;
+}
+
+.answer-source-item + .answer-source-item {
+    border-top: 1px dashed #e2e8f0;
+}
+
+.answer-source-head {
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.answer-source-meta {
+    margin-top: 3px;
+    color: #64748b;
+}
+
+.answer-source-content {
+    margin-top: 6px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: #f8fafc;
+    color: #475569;
+    line-height: 1.6;
+}
+
 .message-delete {
     background: none;
     border: none;

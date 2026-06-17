@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的班级 - 智学伴</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script defer src="/static/js/shared.js?v=fix-text-20260612"></script>
+    <style>
+        .classes-page { max-width: 1120px; margin: 24px auto; padding: 0 20px; }
+        .class-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+        .class-panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 18px; box-shadow: 0 8px 24px rgba(15, 23, 42, .06); }
+        .class-panel h2 { margin: 0 0 14px; font-size: 18px; color: #111827; }
+        .class-list { display: grid; gap: 10px; }
+        .class-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; background: #f9fafb; }
+        .class-card h3 { margin: 0 0 6px; font-size: 16px; color: #111827; }
+        .class-meta { color: #6b7280; font-size: 13px; margin-bottom: 10px; }
+        .class-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .class-btn { height: 34px; border: 0; border-radius: 6px; padding: 0 10px; cursor: pointer; background: #2563eb; color: #fff; }
+        .class-btn.secondary { background: #eef2ff; color: #1d4ed8; }
+        .class-btn.danger { background: #dc2626; }
+        .status-pill { display: inline-flex; border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 700; background: #e5e7eb; color: #374151; }
+        .status-pill.ready, .status-pill.approved { background: #dcfce7; color: #166534; }
+        .status-pill.pending, .status-pill.parsing { background: #dbeafe; color: #1d4ed8; }
+        .status-pill.failed, .status-pill.rejected { background: #fee2e2; color: #991b1b; }
+        .class-status { min-height: 22px; margin: 12px 0; color: #374151; }
+        @media (max-width: 860px) { .class-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    {% include 'components/navbar.html' %}
+    <main class="classes-page">
+        <h1 class="page-title">我的班级</h1>
+        <div class="class-status" id="classStatus"></div>
+        <div class="class-grid">
+            <section class="class-panel">
+                <h2>已加入班级</h2>
+                <div class="class-list" id="joinedClasses"></div>
+            </section>
+            <section class="class-panel">
+                <h2>可申请班级</h2>
+                <div class="class-list" id="availableClasses"></div>
+            </section>
+        </div>
+        <section class="class-panel" style="margin-top:18px;">
+            <h2>我的申请记录</h2>
+            <div class="class-list" id="requestList"></div>
+        </section>
+    </main>
+
+    <script>
+        function getAuthToken() {
+            const localToken = localStorage.getItem('token');
+            if (localToken && localToken !== 'undefined' && localToken !== 'null') return localToken;
+            const cookieToken = getCookie('token');
+            if (cookieToken && cookieToken !== 'undefined' && cookieToken !== 'null') return cookieToken;
+            return '';
+        }
+
+        function authHeaders(json = true) {
+            const headers = { Authorization: `Bearer ${getAuthToken()}` };
+            if (json) headers['Content-Type'] = 'application/json';
+            return headers;
+        }
+
+        function setClassStatus(message) {
+            document.getElementById('classStatus').textContent = message || '';
+        }
+
+        function requestStatusText(status) {
+            return { pending: '待审批', approved: '已同意', rejected: '已拒绝', cancelled: '已撤销' }[status] || status;
+        }
+
+        async function loadMyClasses() {
+            try {
+                const [joinedRes, availableRes, requestRes] = await Promise.all([
+                    fetch('/api/classes', { headers: authHeaders(false) }),
+                    fetch('/api/classes/available', { headers: authHeaders(false) }),
+                    fetch('/api/my/class-requests', { headers: authHeaders(false) })
+                ]);
+                const joinedData = await joinedRes.json();
+                const availableData = await availableRes.json();
+                const requestData = await requestRes.json();
+                if (joinedRes.status === 401 || availableRes.status === 401 || requestRes.status === 401) {
+                    setClassStatus('登录已失效，请重新登录');
+                    return;
+                }
+                renderJoined(joinedData.data || []);
+                renderAvailable(availableData.data || []);
+                renderRequests(requestData.data || []);
+            } catch (error) {
+                setClassStatus(`班级数据加载失败：${error.message}`);
+            }
+        }
+
+        function renderJoined(classes) {
+            const el = document.getElementById('joinedClasses');
+            if (!classes.length) {
+                el.innerHTML = '<div class="class-meta">暂未加入班级。</div>';
+                return;
+            }
+            el.innerHTML = classes.map(item => `
+                <div class="class-card">
+                    <h3>${escapeHtml(item.name || '')}</h3>
+                    <div class="class-meta">负责教师：${escapeHtml(item.teacher_name || '')}</div>
+                    <div class="class-meta">知识库：<span class="status-pill ${item.knowledge_status?.status || ''}">${escapeHtml(item.knowledge_status?.status_text || '未发布')}</span></div>
+                    <div class="class-actions">
+                        <button type="button" class="class-btn danger" data-action="leave" data-class-id="${item.id}">退出班级</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderAvailable(classes) {
+            const el = document.getElementById('availableClasses');
+            const candidates = classes.filter(item => !item.joined);
+            if (!candidates.length) {
+                el.innerHTML = '<div class="class-meta">暂无可申请班级。</div>';
+                return;
+            }
+            el.innerHTML = candidates.map(item => `
+                <div class="class-card">
+                    <h3>${escapeHtml(item.name || '')}</h3>
+                    <div class="class-meta">负责教师：${escapeHtml(item.teacher_name || '')}</div>
+                    <div class="class-meta">${escapeHtml(item.description || '')}</div>
+                    <div class="class-actions">
+                        ${item.pending_request_id ? '<button type="button" class="class-btn secondary" disabled>已申请</button>' : `<button type="button" class="class-btn" data-action="apply" data-class-id="${item.id}">申请加入</button>`}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderRequests(requests) {
+            const el = document.getElementById('requestList');
+            if (!requests.length) {
+                el.innerHTML = '<div class="class-meta">暂无申请记录。</div>';
+                return;
+            }
+            el.innerHTML = requests.map(item => `
+                <div class="class-card">
+                    <h3>${escapeHtml(item.class_name || '')}</h3>
+                    <div class="class-meta">状态：<span class="status-pill ${item.status}">${requestStatusText(item.status)}</span></div>
+                    <div class="class-meta">申请说明：${escapeHtml(item.reason || '')}</div>
+                    <div class="class-meta">审批说明：${escapeHtml(item.review_message || '')}</div>
+                    <div class="class-meta">申请时间：${escapeHtml(item.created_at || '')}</div>
+                    <div class="class-actions">
+                        ${item.status === 'pending' ? `<button type="button" class="class-btn danger" data-action="cancel" data-request-id="${item.id}">撤销申请</button>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function applyClass(classId) {
+            const reason = prompt('申请说明（可选）') || '';
+            setClassStatus('正在提交申请...');
+            try {
+                const res = await fetch(`/api/classes/${classId}/join-requests`, {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ reason })
+                });
+                const data = await res.json();
+                setClassStatus(data.code === 200 ? '申请已提交，等待教师审批' : (data.msg || data.error || '申请失败'));
+                await loadMyClasses();
+            } catch (error) {
+                setClassStatus(`申请失败：${error.message}`);
+            }
+        }
+
+        async function cancelRequest(requestId) {
+            setClassStatus('正在撤销申请...');
+            try {
+                const res = await fetch(`/api/class-requests/${requestId}/cancel`, {
+                    method: 'POST',
+                    headers: authHeaders(false)
+                });
+                const data = await res.json();
+                setClassStatus(data.code === 200 ? '申请已撤销' : (data.msg || data.error || '撤销失败'));
+                await loadMyClasses();
+            } catch (error) {
+                setClassStatus(`撤销失败：${error.message}`);
+            }
+        }
+
+        async function leaveClass(classId) {
+            if (!confirm('确定退出这个班级吗？退出后将无法继续访问该班级知识库。')) return;
+            setClassStatus('正在退出班级...');
+            try {
+                const res = await fetch(`/api/my/classes/${classId}`, {
+                    method: 'DELETE',
+                    headers: authHeaders(false)
+                });
+                const data = await res.json();
+                setClassStatus(data.code === 200 ? '已退出班级' : (data.msg || data.error || '退出失败'));
+                await loadMyClasses();
+            } catch (error) {
+                setClassStatus(`退出失败：${error.message}`);
+            }
+        }
+
+        document.addEventListener('click', event => {
+            const button = event.target.closest('[data-action]');
+            if (!button) return;
+            const action = button.dataset.action;
+            if (action === 'apply') applyClass(Number(button.dataset.classId));
+            if (action === 'cancel') cancelRequest(Number(button.dataset.requestId));
+            if (action === 'leave') leaveClass(Number(button.dataset.classId));
+        });
+
+        document.addEventListener('DOMContentLoaded', loadMyClasses);
+    </script>
+</body>
+</html>
