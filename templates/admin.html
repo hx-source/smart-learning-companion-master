@@ -24,13 +24,31 @@
         .admin-btn.secondary { background: #eef2ff; color: #1d4ed8; }
         .admin-btn.danger { background: #dc2626; }
         .admin-status { min-height: 22px; margin: 12px 0; color: #374151; }
+        .admin-muted { color: #6b7280; font-size: 13px; }
+        .admin-detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+        .admin-metric { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; background: #f9fafb; }
+        .admin-metric strong { display: block; color: #111827; font-size: 18px; margin-top: 4px; }
+        .admin-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+        .admin-tab { border: 1px solid #d1d5db; background: #fff; color: #374151; height: 34px; border-radius: 6px; padding: 0 10px; cursor: pointer; }
+        .admin-tab.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+        .status-pill { display: inline-flex; border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 700; background: #e5e7eb; color: #374151; }
+        .status-pill.ready, .status-pill.approved { background: #dcfce7; color: #166534; }
+        .status-pill.pending, .status-pill.parsing { background: #dbeafe; color: #1d4ed8; }
+        .status-pill.failed, .status-pill.rejected { background: #fee2e2; color: #991b1b; }
+        .batch-box { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin: 10px 0; }
+        .batch-list { min-height: 88px; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px; }
         @media (max-width: 860px) { .admin-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 860px) { .admin-detail-grid, .batch-box { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
     {% include 'components/navbar.html' %}
     <main class="admin-page">
         <h1 class="page-title">管理员后台</h1>
+        {% if request.current_user.has_role('teacher') and not request.current_user.has_role('admin') %}
+        <p class="admin-muted">教师后台仅显示你负责的班级、成员、申请审批和班级知识库状态。</p>
+        {% endif %}
+        {% if request.current_user.has_role('admin') %}
         <div class="admin-grid">
             <section class="admin-panel">
                 <h2>创建用户</h2>
@@ -69,6 +87,7 @@
                 </table>
             </section>
         </div>
+        {% endif %}
 
         <section class="admin-panel" style="margin-top: 20px;">
             <div class="admin-actions">
@@ -77,7 +96,9 @@
             </div>
             <form class="admin-form" id="createClassForm" style="grid-template-columns: 1fr 1fr 1fr auto; align-items: end; margin-bottom: 16px;">
                 <label>班级名称<input id="newClassName" required placeholder="例如：人工智能230582班"></label>
+                {% if request.current_user.has_role('admin') %}
                 <label>负责教师<select id="newClassTeacher"></select></label>
+                {% endif %}
                 <label>说明<input id="newClassDescription" placeholder="可选"></label>
                 <button class="admin-btn" type="submit">创建班级</button>
             </form>
@@ -88,6 +109,8 @@
                         <th>班级</th>
                         <th>教师</th>
                         <th>成员</th>
+                        <th>知识库</th>
+                        <th>待审批</th>
                         <th>创建时间</th>
                         <th>操作</th>
                     </tr>
@@ -96,6 +119,12 @@
             </table>
         </section>
 
+        <section class="admin-panel" style="margin-top: 20px;" id="classDetailPanel">
+            <h2>班级详情</h2>
+            <div id="classDetailContent" class="admin-muted">请选择一个班级查看详情。</div>
+        </section>
+
+        {% if request.current_user.has_role('admin') %}
         <section class="admin-panel" style="margin-top: 20px;">
             <h2>班级知识库</h2>
             <table class="admin-table">
@@ -110,13 +139,17 @@
                 <tbody id="classKbTableBody"></tbody>
             </table>
         </section>
+        {% endif %}
     </main>
 
     <script>
         const roleLabels = { student: '学生', teacher: '教师', admin: '管理员' };
+        const isAdmin = {{ 'true' if request.current_user.has_role('admin') else 'false' }};
         let adminUsers = [];
         let adminClasses = [];
         let classMembers = {};
+        let selectedClassId = null;
+        let detailCache = { members: [], requests: [], logs: [], availableStudents: [], knowledgeStatus: null, classInfo: null };
 
         function adminHeaders(json = true) {
             const headers = { Authorization: `Bearer ${localStorage.getItem('token') || getCookie('token')}` };
@@ -129,14 +162,15 @@
         }
 
         async function loadAdminData() {
-            const [usersRes, classesRes, classKbRes] = await Promise.all([
-                fetch('/api/admin/users', { headers: adminHeaders(false) }),
+            const requests = [
                 fetch('/api/classes', { headers: adminHeaders(false) }),
-                fetch('/api/admin/class-knowledge-bases', { headers: adminHeaders(false) })
-            ]);
-            const usersData = await usersRes.json();
-            const classesData = await classesRes.json();
-            const classKbData = await classKbRes.json();
+                fetch('/api/teacher/class-knowledge-bases', { headers: adminHeaders(false) })
+            ];
+            if (isAdmin) requests.unshift(fetch('/api/admin/users', { headers: adminHeaders(false) }));
+            const responses = await Promise.all(requests);
+            const usersData = isAdmin ? await responses.shift().json() : { data: [] };
+            const classesData = await responses.shift().json();
+            const classKbData = await responses.shift().json();
             adminUsers = usersData.data || [];
             adminClasses = classesData.data || [];
 
@@ -146,33 +180,38 @@
                 classMembers[item.id] = data.data || [];
             }));
 
-            const usersBody = document.getElementById('usersTableBody');
-            usersBody.innerHTML = adminUsers.map(user => `
-                <tr>
-                    <td>${user.id}</td>
-                    <td>${escapeHtml(user.username || '')}</td>
-                    <td>${escapeHtml(user.email || '')}</td>
-                    <td>
-                        <select onchange="updateUserRole(${user.id}, this.value)">
-                            ${Object.keys(roleLabels).map(role => `<option value="${role}" ${user.role === role ? 'selected' : ''}>${roleLabels[role]}</option>`).join('')}
-                        </select>
-                    </td>
-                    <td><button class="admin-btn danger" onclick="deleteUser(${user.id})">删除</button></td>
-                </tr>
-            `).join('');
+            if (isAdmin) {
+                const usersBody = document.getElementById('usersTableBody');
+                usersBody.innerHTML = adminUsers.map(user => `
+                    <tr>
+                        <td>${user.id}</td>
+                        <td>${escapeHtml(user.username || '')}</td>
+                        <td>${escapeHtml(user.email || '')}</td>
+                        <td>
+                            <select onchange="updateUserRole(${user.id}, this.value)">
+                                ${Object.keys(roleLabels).map(role => `<option value="${role}" ${user.role === role ? 'selected' : ''}>${roleLabels[role]}</option>`).join('')}
+                            </select>
+                        </td>
+                        <td><button class="admin-btn danger" onclick="deleteUser(${user.id})">删除</button></td>
+                    </tr>
+                `).join('');
+            }
 
             renderTeacherOptions();
-            renderClasses();
+            await renderClasses();
 
-            const classBody = document.getElementById('classKbTableBody');
-            classBody.innerHTML = (classKbData.data || []).map(item => `
-                <tr>
-                    <td>${escapeHtml(item.class_name || '')}</td>
-                    <td>${escapeHtml(item.knowledge_base || '')}</td>
-                    <td>${escapeHtml(item.teacher_name || '')}</td>
-                    <td>${escapeHtml(item.created_at || '')}</td>
-                </tr>
-            `).join('');
+            if (isAdmin) {
+                const classBody = document.getElementById('classKbTableBody');
+                classBody.innerHTML = (classKbData.data || []).map(item => `
+                    <tr>
+                        <td>${escapeHtml(item.class_name || '')}</td>
+                        <td>${escapeHtml(item.knowledge_base || '')}</td>
+                        <td>${escapeHtml(item.teacher_name || '')}</td>
+                        <td>${escapeHtml(item.created_at || '')}</td>
+                    </tr>
+                `).join('');
+            }
+            if (selectedClassId) await openClassDetail(selectedClassId, false);
         }
 
         function renderTeacherOptions() {
@@ -182,37 +221,156 @@
             select.innerHTML = teachers.map(user => `<option value="${user.id}">${escapeHtml(user.username)}（${roleLabels[user.role]}）</option>`).join('');
         }
 
-        function renderClasses() {
+        async function renderClasses() {
             const body = document.getElementById('classTableBody');
-            const students = adminUsers.filter(user => user.role === 'student');
+            const statusEntries = await Promise.all(adminClasses.map(async item => {
+                try {
+                    const res = await fetch(`/api/classes/${item.id}/knowledge-status`, { headers: adminHeaders(false) });
+                    const data = await res.json();
+                    return [item.id, data.data || null];
+                } catch (error) {
+                    return [item.id, null];
+                }
+            }));
+            const statusMap = new Map(statusEntries);
             body.innerHTML = adminClasses.map(item => {
                 const members = classMembers[item.id] || [];
-                const memberNames = members.map(member => escapeHtml(member.student_name || '')).join('、') || '暂无学生';
-                const memberIds = new Set(members.map(member => member.student_id));
-                const studentOptions = students
-                    .filter(student => !memberIds.has(student.id))
-                    .map(student => `<option value="${student.id}">${escapeHtml(student.username)}</option>`)
-                    .join('');
+                const status = statusMap.get(item.id);
                 return `
                     <tr>
                         <td>${item.id}</td>
                         <td>${escapeHtml(item.name || '')}</td>
                         <td>${escapeHtml(item.teacher_name || '')}</td>
-                        <td>
-                            <div style="margin-bottom: 8px;">${memberNames}</div>
-                            <div class="admin-actions">
-                                <select id="studentSelect_${item.id}">${studentOptions || '<option value="">无可添加学生</option>'}</select>
-                                <button class="admin-btn secondary" onclick="addClassMember(${item.id})">添加学生</button>
-                            </div>
-                            <div style="margin-top: 8px;">
-                                ${members.map(member => `<button class="admin-btn danger" style="height:28px;margin:2px;" onclick="removeClassMember(${item.id}, ${member.student_id})">${escapeHtml(member.student_name || '')} ×</button>`).join('')}
-                            </div>
-                        </td>
+                        <td>${members.length}</td>
+                        <td><span class="status-pill ${status?.status || ''}">${escapeHtml(status?.status_text || '未发布')}</span></td>
+                        <td>${item.pending_request_count || 0}</td>
                         <td>${escapeHtml(item.created_at || '')}</td>
-                        <td><button class="admin-btn danger" onclick="deleteClassRoom(${item.id})">删除班级</button></td>
+                        <td>
+                            <button class="admin-btn secondary" onclick="openClassDetail(${item.id})">详情</button>
+                            <button class="admin-btn danger" onclick="deleteClassRoom(${item.id})">删除</button>
+                        </td>
                     </tr>
                 `;
             }).join('');
+        }
+
+        async function openClassDetail(classId, setSelected = true) {
+            if (setSelected) selectedClassId = classId;
+            const panel = document.getElementById('classDetailContent');
+            panel.innerHTML = '正在加载班级详情...';
+            const [classRes, membersRes, requestsRes, logsRes, studentsRes, statusRes] = await Promise.all([
+                fetch(`/api/classes/${classId}`, { headers: adminHeaders(false) }),
+                fetch(`/api/classes/${classId}/members`, { headers: adminHeaders(false) }),
+                fetch(`/api/classes/${classId}/join-requests`, { headers: adminHeaders(false) }),
+                fetch(`/api/classes/${classId}/member-logs`, { headers: adminHeaders(false) }),
+                fetch(`/api/classes/${classId}/available-students`, { headers: adminHeaders(false) }),
+                fetch(`/api/classes/${classId}/knowledge-status`, { headers: adminHeaders(false) })
+            ]);
+            const classData = await classRes.json();
+            const membersData = await membersRes.json();
+            const requestsData = await requestsRes.json();
+            const logsData = await logsRes.json();
+            const studentsData = await studentsRes.json();
+            const statusData = await statusRes.json();
+            detailCache = {
+                classInfo: classData.data,
+                members: membersData.data || [],
+                requests: requestsData.data || [],
+                logs: logsData.data || [],
+                availableStudents: studentsData.data || [],
+                knowledgeStatus: statusData.data || null
+            };
+            renderClassDetail();
+        }
+
+        function renderClassDetail() {
+            const panel = document.getElementById('classDetailContent');
+            const info = detailCache.classInfo;
+            if (!info) {
+                panel.innerHTML = '<div class="admin-muted">班级详情加载失败。</div>';
+                return;
+            }
+            const status = detailCache.knowledgeStatus || {};
+            const pendingRequests = detailCache.requests.filter(item => item.status === 'pending');
+            panel.innerHTML = `
+                <div class="admin-detail-grid">
+                    <div class="admin-metric">班级<strong>${escapeHtml(info.name || '')}</strong></div>
+                    <div class="admin-metric">负责教师<strong>${escapeHtml(info.teacher_name || '')}</strong></div>
+                    <div class="admin-metric">学生人数<strong>${detailCache.members.length}</strong></div>
+                    <div class="admin-metric">待审批<strong>${pendingRequests.length}</strong></div>
+                </div>
+                <div class="admin-detail-grid">
+                    <div class="admin-metric">知识库状态<strong><span class="status-pill ${status.status || ''}">${escapeHtml(status.status_text || '未发布')}</span></strong></div>
+                    <div class="admin-metric">文档数<strong>${status.document_count || 0}</strong></div>
+                    <div class="admin-metric">失败/解析中<strong>${status.failed_count || 0} / ${status.parsing_count || 0}</strong></div>
+                    <div class="admin-metric">向量数<strong>${status.vector_count || 0}</strong></div>
+                </div>
+                <h3>批量添加学生</h3>
+                <div class="batch-box">
+                    <label>可添加学生
+                        <select id="batchStudentSelect" class="batch-list" multiple>
+                            ${detailCache.availableStudents.map(student => `<option value="${student.id}">${escapeHtml(student.username || '')} ${student.email ? `(${escapeHtml(student.email)})` : ''}</option>`).join('')}
+                        </select>
+                    </label>
+                    <button class="admin-btn" onclick="addClassMembersBatch(${info.id})">批量添加</button>
+                </div>
+                <h3>学生成员</h3>
+                <table class="admin-table">
+                    <thead><tr><th>学生</th><th>加入时间</th><th>操作</th></tr></thead>
+                    <tbody>
+                        ${detailCache.members.length ? detailCache.members.map(member => `
+                            <tr>
+                                <td>${escapeHtml(member.student_name || '')}</td>
+                                <td>${escapeHtml(member.joined_at || '')}</td>
+                                <td><button class="admin-btn danger" onclick="removeClassMember(${info.id}, ${member.student_id})">移除</button></td>
+                            </tr>
+                        `).join('') : '<tr><td colspan="3">暂无学生</td></tr>'}
+                    </tbody>
+                </table>
+                <h3>加入申请</h3>
+                <table class="admin-table">
+                    <thead><tr><th>学生</th><th>说明</th><th>状态</th><th>申请时间</th><th>审批</th></tr></thead>
+                    <tbody>
+                        ${detailCache.requests.length ? detailCache.requests.map(req => `
+                            <tr>
+                                <td>${escapeHtml(req.student_name || '')}</td>
+                                <td>${escapeHtml(req.reason || '')}</td>
+                                <td><span class="status-pill ${req.status}">${requestStatusText(req.status)}</span></td>
+                                <td>${escapeHtml(req.created_at || '')}</td>
+                                <td>
+                                    ${req.status === 'pending' ? `
+                                        <button class="admin-btn secondary" onclick="reviewJoinRequest(${req.id}, 'approved')">同意</button>
+                                        <button class="admin-btn danger" onclick="reviewJoinRequest(${req.id}, 'rejected')">拒绝</button>
+                                    ` : escapeHtml(req.reviewed_at || '')}
+                                </td>
+                            </tr>
+                        `).join('') : '<tr><td colspan="5">暂无申请</td></tr>'}
+                    </tbody>
+                </table>
+                <h3>成员变更记录</h3>
+                <table class="admin-table">
+                    <thead><tr><th>学生</th><th>动作</th><th>来源</th><th>操作人</th><th>时间</th></tr></thead>
+                    <tbody>
+                        ${detailCache.logs.length ? detailCache.logs.map(log => `
+                            <tr>
+                                <td>${escapeHtml(log.student_name || '')}</td>
+                                <td>${memberActionText(log.action)}</td>
+                                <td>${escapeHtml(log.source || '')}</td>
+                                <td>${escapeHtml(log.operator_name || '')}</td>
+                                <td>${escapeHtml(log.created_at || '')}</td>
+                            </tr>
+                        `).join('') : '<tr><td colspan="5">暂无记录</td></tr>'}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function requestStatusText(status) {
+            return { pending: '待审批', approved: '已同意', rejected: '已拒绝', cancelled: '已撤销' }[status] || status;
+        }
+
+        function memberActionText(action) {
+            return { joined: '加入', approved: '申请通过', left: '退出', removed: '移除' }[action] || action;
         }
 
         async function updateUserRole(userId, role) {
@@ -237,7 +395,7 @@
             loadAdminData();
         }
 
-        document.getElementById('createUserForm').addEventListener('submit', async (event) => {
+        document.getElementById('createUserForm')?.addEventListener('submit', async (event) => {
             event.preventDefault();
             const payload = {
                 username: document.getElementById('newUsername').value.trim(),
@@ -264,7 +422,7 @@
             event.preventDefault();
             const payload = {
                 name: document.getElementById('newClassName').value.trim(),
-                teacher_id: Number(document.getElementById('newClassTeacher').value),
+                teacher_id: Number(document.getElementById('newClassTeacher')?.value || 0),
                 description: document.getElementById('newClassDescription').value.trim()
             };
             const res = await fetch('/api/classes', {
@@ -294,6 +452,43 @@
             const data = await res.json();
             setAdminStatus(data.code === 200 ? '学生已加入班级' : (data.msg || data.error || '添加失败'));
             loadAdminData();
+        }
+
+        async function addClassMembersBatch(classId) {
+            const select = document.getElementById('batchStudentSelect');
+            const studentIds = Array.from(select?.selectedOptions || []).map(option => Number(option.value)).filter(Boolean);
+            if (!studentIds.length) {
+                setAdminStatus('请选择要添加的学生');
+                return;
+            }
+            const res = await fetch(`/api/classes/${classId}/members/batch`, {
+                method: 'POST',
+                headers: adminHeaders(),
+                body: JSON.stringify({ student_ids: studentIds })
+            });
+            const data = await res.json();
+            if (data.code === 200) {
+                setAdminStatus(`已添加 ${data.data.added_count} 名学生`);
+                await loadAdminData();
+            } else {
+                setAdminStatus(data.msg || data.error || '批量添加失败');
+            }
+        }
+
+        async function reviewJoinRequest(requestId, status) {
+            const reviewMessage = status === 'rejected' ? (prompt('拒绝原因（可选）') || '') : '';
+            const res = await fetch(`/api/class-requests/${requestId}/review`, {
+                method: 'POST',
+                headers: adminHeaders(),
+                body: JSON.stringify({ status, review_message: reviewMessage })
+            });
+            const data = await res.json();
+            if (data.code === 200) {
+                setAdminStatus(status === 'approved' ? '已同意申请' : '已拒绝申请');
+                await loadAdminData();
+            } else {
+                setAdminStatus(data.msg || data.error || '审批失败');
+            }
         }
 
         async function removeClassMember(classId, studentId) {

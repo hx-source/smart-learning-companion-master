@@ -183,6 +183,76 @@ class ClassMember(db.Model):
         }
 
 
+class ClassJoinRequest(db.Model):
+    """Student request to join a class, reviewed by the class teacher or admin."""
+    __tablename__ = 'class_join_requests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    class_id = db.Column(db.Integer, db.ForeignKey('class_rooms.id'), nullable=False, index=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    status = db.Column(db.String(20), default='pending', nullable=False, index=True)
+    reason = db.Column(db.String(255), nullable=True)
+    review_message = db.Column(db.String(255), nullable=True)
+    reviewer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+
+    class_room = db.relationship('ClassRoom', backref=db.backref('join_requests', lazy='dynamic', cascade='all, delete-orphan'))
+    student = db.relationship('User', foreign_keys=[student_id], backref=db.backref('class_join_requests', lazy='dynamic'))
+    reviewer = db.relationship('User', foreign_keys=[reviewer_id])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'class_id': self.class_id,
+            'class_name': self.class_room.name if self.class_room else None,
+            'teacher_id': self.class_room.teacher_id if self.class_room else None,
+            'teacher_name': self.class_room.teacher.username if self.class_room and self.class_room.teacher else None,
+            'student_id': self.student_id,
+            'student_name': self.student.username if self.student else None,
+            'status': self.status,
+            'reason': self.reason,
+            'review_message': self.review_message,
+            'reviewer_id': self.reviewer_id,
+            'reviewer_name': self.reviewer.username if self.reviewer else None,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else None,
+            'reviewed_at': self.reviewed_at.strftime('%Y-%m-%d %H:%M') if self.reviewed_at else None
+        }
+
+
+class ClassMemberLog(db.Model):
+    """Audit trail for class membership changes."""
+    __tablename__ = 'class_member_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    class_id = db.Column(db.Integer, db.ForeignKey('class_rooms.id'), nullable=False, index=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    action = db.Column(db.String(30), nullable=False, index=True)
+    operator_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+    source = db.Column(db.String(30), default='manual', nullable=False)
+    details = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    class_room = db.relationship('ClassRoom', backref=db.backref('member_logs', lazy='dynamic', cascade='all, delete-orphan'))
+    student = db.relationship('User', foreign_keys=[student_id])
+    operator = db.relationship('User', foreign_keys=[operator_id])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'class_id': self.class_id,
+            'class_name': self.class_room.name if self.class_room else None,
+            'student_id': self.student_id,
+            'student_name': self.student.username if self.student else None,
+            'action': self.action,
+            'operator_id': self.operator_id,
+            'operator_name': self.operator.username if self.operator else None,
+            'source': self.source,
+            'details': self.details,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else None
+        }
+
+
 class ClassKnowledgeBase(db.Model):
     """Knowledge base owned by a teacher and attached to a class."""
     __tablename__ = 'class_knowledge_bases'

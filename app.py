@@ -13,7 +13,7 @@ from sqlalchemy import inspect, text
 from werkzeug.utils import secure_filename
 
 from config import Config
-from app.models import db, User, LearningRecord, ClassRoom, ClassMember, ClassKnowledgeBase, UserKnowledgeBase, KnowledgeDocument
+from app.models import db, User, LearningRecord, ClassRoom, ClassMember, ClassJoinRequest, ClassMemberLog, ClassKnowledgeBase, UserKnowledgeBase, KnowledgeDocument
 from app.services.ai_service import AIService
 from app.services.auth_service import AuthService, auth_required, token_required, admin_required, role_required
 from app.services.knowledge_service import QAModule
@@ -93,6 +93,91 @@ def _is_student_in_class(class_id):
     if request.current_user.has_role('admin'):
         return True
     return ClassMember.query.filter_by(class_id=class_id, student_id=request.current_user.id).first() is not None
+
+
+def _write_class_member_log(class_id, student_id, action, source='manual', details=None, operator_id=None):
+    log = ClassMemberLog(
+        class_id=class_id,
+        student_id=student_id,
+        action=action,
+        operator_id=operator_id if operator_id is not None else getattr(request.current_user, 'id', None),
+        source=source,
+        details=details
+    )
+    db.session.add(log)
+    return log
+
+
+def _class_knowledge_status(class_room):
+    mapping = ClassKnowledgeBase.query.filter_by(class_id=class_room.id).first()
+    if not mapping:
+        legacy_mapping = ClassKnowledgeBase.query.filter_by(class_name=class_room.name, teacher_id=class_room.teacher_id).first()
+        if legacy_mapping:
+            mapping = legacy_mapping
+            if not mapping.class_id:
+                mapping.class_id = class_room.id
+                db.session.flush()
+    if not mapping:
+        return {
+            'has_knowledge_base': False,
+            'status': 'not_published',
+            'status_text': '未发布',
+            'knowledge_base': None,
+            'display_name': None,
+            'document_count': 0,
+            'ready_count': 0,
+            'failed_count': 0,
+            'parsing_count': 0,
+            'vector_count': 0
+        }
+
+    documents = KnowledgeDocument.query.filter_by(knowledge_base=mapping.knowledge_base).all()
+    document_count = len(documents)
+    ready_count = sum(1 for item in documents if item.status == 'ready')
+    failed_count = sum(1 for item in documents if item.status == 'failed')
+    parsing_count = sum(1 for item in documents if item.status in {'pending', 'parsing'})
+    vector_count = sum((item.vector_count or 0) for item in documents)
+
+    if document_count == 0:
+        status, text = 'empty', '已发布未上传'
+    elif parsing_count:
+        status, text = 'parsing', '解析中'
+    elif ready_count and failed_count:
+        status, text = 'partial_failed', '部分失败'
+    elif failed_count and not ready_count:
+        status, text = 'failed', '解析失败'
+    elif ready_count and vector_count > 0:
+        status, text = 'ready', '可用'
+    else:
+        status, text = 'empty', '无可用向量'
+
+    return {
+        'has_knowledge_base': True,
+        'status': status,
+        'status_text': text,
+        'knowledge_base': mapping.knowledge_base,
+        'display_name': mapping.class_name,
+        'teacher_id': mapping.teacher_id,
+        'teacher_name': mapping.teacher.username if mapping.teacher else None,
+        'document_count': document_count,
+        'ready_count': ready_count,
+        'failed_count': failed_count,
+        'parsing_count': parsing_count,
+        'vector_count': vector_count,
+        'created_at': mapping.created_at.strftime('%Y-%m-%d %H:%M') if mapping.created_at else None
+    }
+
+
+def _class_detail_payload(class_room):
+    members = ClassMember.query.filter_by(class_id=class_room.id).order_by(ClassMember.joined_at.desc()).all()
+    pending_count = ClassJoinRequest.query.filter_by(class_id=class_room.id, status='pending').count()
+    payload = class_room.to_dict()
+    payload.update({
+        'member_count': len(members),
+        'pending_request_count': pending_count,
+        'knowledge_status': _class_knowledge_status(class_room)
+    })
+    return payload
 
 
 def _ensure_class_room_for_legacy_mapping(mapping):
@@ -257,6 +342,10 @@ def _ensure_runtime_schema():
             ClassRoom.__table__.create(db.engine)
         if not inspector.has_table('class_members'):
             ClassMember.__table__.create(db.engine)
+        if not inspector.has_table('class_join_requests'):
+            ClassJoinRequest.__table__.create(db.engine)
+        if not inspector.has_table('class_member_logs'):
+            ClassMemberLog.__table__.create(db.engine)
         if not inspector.has_table('class_knowledge_bases'):
             ClassKnowledgeBase.__table__.create(db.engine)
         if not inspector.has_table('user_knowledge_bases'):
@@ -303,7 +392,7 @@ def profile():
 @app.route('/admin')
 @auth_required
 def admin_console():
-    if not request.current_user.has_role('admin'):
+    if not request.current_user.has_role('teacher', 'admin'):
         return jsonify({'code': 403, 'msg': 'Permission denied'}), 403
     return render_template('admin.html')
 
@@ -312,6 +401,12 @@ def admin_console():
 @auth_required
 def knowledge_base_page():
     return render_template('knowledge-base.html')
+
+
+@app.route('/my-classes')
+@auth_required
+def my_classes_page():
+    return render_template('my-classes.html')
 
 
 @app.route('/login')
@@ -404,10 +499,16 @@ def admin_delete_user(user_id):
         return jsonify({'code': 404, 'msg': 'user not found'}), 404
     LearningRecord.query.filter_by(user_id=user_id).delete()
     KnowledgeDocument.query.filter_by(uploader_id=user_id).update({'uploader_id': request.current_user.id})
+    ClassJoinRequest.query.filter_by(student_id=user_id).delete()
+    ClassJoinRequest.query.filter_by(reviewer_id=user_id).update({'reviewer_id': request.current_user.id})
+    ClassMemberLog.query.filter_by(student_id=user_id).delete()
+    ClassMemberLog.query.filter_by(operator_id=user_id).update({'operator_id': request.current_user.id})
     ClassKnowledgeBase.query.filter_by(teacher_id=user_id).delete()
     ClassMember.query.filter_by(student_id=user_id).delete()
     teacher_class_ids = [item.id for item in ClassRoom.query.filter_by(teacher_id=user_id).all()]
     if teacher_class_ids:
+        ClassJoinRequest.query.filter(ClassJoinRequest.class_id.in_(teacher_class_ids)).delete(synchronize_session=False)
+        ClassMemberLog.query.filter(ClassMemberLog.class_id.in_(teacher_class_ids)).delete(synchronize_session=False)
         ClassMember.query.filter(ClassMember.class_id.in_(teacher_class_ids)).delete(synchronize_session=False)
         ClassRoom.query.filter(ClassRoom.id.in_(teacher_class_ids)).delete(synchronize_session=False)
     db.session.delete(user)
@@ -427,7 +528,27 @@ def list_classes():
         memberships = ClassMember.query.filter_by(student_id=request.current_user.id).all()
         class_ids = [item.class_id for item in memberships]
         classes = ClassRoom.query.filter(ClassRoom.id.in_(class_ids)).order_by(ClassRoom.created_at.desc()).all() if class_ids else []
-    return jsonify({'code': 200, 'data': [item.to_dict() for item in classes]})
+    return jsonify({'code': 200, 'data': [_class_detail_payload(item) for item in classes]})
+
+
+@app.route('/api/classes/available', methods=['GET'])
+@role_required('student')
+def list_available_classes():
+    joined_ids = {
+        item.class_id for item in ClassMember.query.filter_by(student_id=request.current_user.id).all()
+    }
+    pending_requests = {
+        item.class_id: item
+        for item in ClassJoinRequest.query.filter_by(student_id=request.current_user.id, status='pending').all()
+    }
+    classes = ClassRoom.query.order_by(ClassRoom.created_at.desc()).all()
+    data = []
+    for class_room in classes:
+        item = _class_detail_payload(class_room)
+        item['joined'] = class_room.id in joined_ids
+        item['pending_request_id'] = pending_requests[class_room.id].id if class_room.id in pending_requests else None
+        data.append(item)
+    return jsonify({'code': 200, 'data': data})
 
 
 @app.route('/api/classes', methods=['POST'])
@@ -448,6 +569,21 @@ def create_class_room():
     return jsonify({'code': 200, 'data': class_room.to_dict()})
 
 
+@app.route('/api/classes/<int:class_id>', methods=['GET'])
+@token_required
+def get_class_room(class_id):
+    class_room = ClassRoom.query.get(class_id)
+    if not class_room:
+        return jsonify({'code': 404, 'msg': 'class not found'}), 404
+    role = _current_user_role()
+    if role in {'teacher', 'admin'}:
+        if not _can_manage_class_room(class_room):
+            return jsonify({'code': 403, 'msg': 'Cannot view this class'}), 403
+    elif not _is_student_in_class(class_id):
+        return jsonify({'code': 403, 'msg': 'Cannot view this class'}), 403
+    return jsonify({'code': 200, 'data': _class_detail_payload(class_room)})
+
+
 @app.route('/api/classes/<int:class_id>', methods=['DELETE'])
 @role_required('teacher', 'admin')
 def delete_class_room(class_id):
@@ -460,6 +596,8 @@ def delete_class_room(class_id):
         QAModule(mapping.knowledge_base).delete_knowledge_base()
         KnowledgeDocument.query.filter_by(knowledge_base=mapping.knowledge_base).delete()
         db.session.delete(mapping)
+    ClassJoinRequest.query.filter_by(class_id=class_id).delete()
+    ClassMemberLog.query.filter_by(class_id=class_id).delete()
     ClassMember.query.filter_by(class_id=class_id).delete()
     db.session.delete(class_room)
     db.session.commit()
@@ -476,6 +614,21 @@ def list_class_members(class_id):
         return jsonify({'code': 403, 'msg': 'Cannot manage this class'}), 403
     members = ClassMember.query.filter_by(class_id=class_id).all()
     return jsonify({'code': 200, 'data': [item.to_dict() for item in members]})
+
+
+@app.route('/api/classes/<int:class_id>/available-students', methods=['GET'])
+@role_required('teacher', 'admin')
+def list_available_class_students(class_id):
+    class_room = ClassRoom.query.get(class_id)
+    if not class_room:
+        return jsonify({'code': 404, 'msg': 'class not found'}), 404
+    if not _can_manage_class_room(class_room):
+        return jsonify({'code': 403, 'msg': 'Cannot manage this class'}), 403
+    member_ids = {
+        item.student_id for item in ClassMember.query.filter_by(class_id=class_id).all()
+    }
+    students = User.query.filter_by(role='student').order_by(User.username.asc()).all()
+    return jsonify({'code': 200, 'data': [student.to_dict() for student in students if student.id not in member_ids]})
 
 
 @app.route('/api/classes/<int:class_id>/members', methods=['POST'])
@@ -495,8 +648,48 @@ def add_class_member(class_id):
     if not membership:
         membership = ClassMember(class_id=class_id, student_id=student.id)
         db.session.add(membership)
+        _write_class_member_log(class_id, student.id, 'joined', source='manual', details='teacher/admin added student')
         db.session.commit()
     return jsonify({'code': 200, 'data': membership.to_dict()})
+
+
+@app.route('/api/classes/<int:class_id>/members/batch', methods=['POST'])
+@role_required('teacher', 'admin')
+def add_class_members_batch(class_id):
+    class_room = ClassRoom.query.get(class_id)
+    if not class_room:
+        return jsonify({'code': 404, 'msg': 'class not found'}), 404
+    if not _can_manage_class_room(class_room):
+        return jsonify({'code': 403, 'msg': 'Cannot manage this class'}), 403
+    data = request.json or {}
+    raw_ids = data.get('student_ids') or []
+    if not isinstance(raw_ids, list):
+        return jsonify({'code': 400, 'msg': 'student_ids must be a list'}), 400
+    student_ids = []
+    for value in raw_ids:
+        try:
+            student_ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    existing_ids = {
+        item.student_id for item in ClassMember.query.filter_by(class_id=class_id).all()
+    }
+    added = []
+    skipped = []
+    for student in User.query.filter(User.id.in_(student_ids)).all() if student_ids else []:
+        if (student.role or 'student') != 'student':
+            skipped.append({'id': student.id, 'reason': 'not_student'})
+            continue
+        if student.id in existing_ids:
+            skipped.append({'id': student.id, 'reason': 'already_member'})
+            continue
+        membership = ClassMember(class_id=class_id, student_id=student.id)
+        db.session.add(membership)
+        _write_class_member_log(class_id, student.id, 'joined', source='batch', details='batch added student')
+        existing_ids.add(student.id)
+        added.append(student.id)
+    db.session.commit()
+    return jsonify({'code': 200, 'data': {'added_count': len(added), 'added_ids': added, 'skipped': skipped}})
 
 
 @app.route('/api/classes/<int:class_id>/members/<int:student_id>', methods=['DELETE'])
@@ -508,8 +701,135 @@ def remove_class_member(class_id, student_id):
     if not _can_manage_class_room(class_room):
         return jsonify({'code': 403, 'msg': 'Cannot manage this class'}), 403
     ClassMember.query.filter_by(class_id=class_id, student_id=student_id).delete()
+    _write_class_member_log(class_id, student_id, 'removed', source='manual', details='teacher/admin removed student')
     db.session.commit()
     return jsonify({'code': 200, 'msg': 'member removed'})
+
+
+@app.route('/api/classes/<int:class_id>/join-requests', methods=['GET'])
+@role_required('teacher', 'admin')
+def list_class_join_requests(class_id):
+    class_room = ClassRoom.query.get(class_id)
+    if not class_room:
+        return jsonify({'code': 404, 'msg': 'class not found'}), 404
+    if not _can_manage_class_room(class_room):
+        return jsonify({'code': 403, 'msg': 'Cannot manage this class'}), 403
+    status = (request.args.get('status') or '').strip()
+    query = ClassJoinRequest.query.filter_by(class_id=class_id)
+    if status:
+        query = query.filter_by(status=status)
+    requests_list = query.order_by(ClassJoinRequest.created_at.desc()).all()
+    return jsonify({'code': 200, 'data': [item.to_dict() for item in requests_list]})
+
+
+@app.route('/api/classes/<int:class_id>/join-requests', methods=['POST'])
+@role_required('student')
+def create_class_join_request(class_id):
+    class_room = ClassRoom.query.get(class_id)
+    if not class_room:
+        return jsonify({'code': 404, 'msg': 'class not found'}), 404
+    if ClassMember.query.filter_by(class_id=class_id, student_id=request.current_user.id).first():
+        return jsonify({'code': 400, 'msg': 'already joined this class'}), 400
+    pending = ClassJoinRequest.query.filter_by(class_id=class_id, student_id=request.current_user.id, status='pending').first()
+    if pending:
+        return jsonify({'code': 400, 'msg': 'request already pending', 'data': pending.to_dict()}), 400
+    data = request.json or {}
+    join_request = ClassJoinRequest(
+        class_id=class_id,
+        student_id=request.current_user.id,
+        reason=(data.get('reason') or '').strip() or None
+    )
+    db.session.add(join_request)
+    db.session.commit()
+    return jsonify({'code': 200, 'data': join_request.to_dict()})
+
+
+@app.route('/api/my/class-requests', methods=['GET'])
+@role_required('student')
+def list_my_class_requests():
+    requests_list = ClassJoinRequest.query.filter_by(student_id=request.current_user.id).order_by(ClassJoinRequest.created_at.desc()).all()
+    return jsonify({'code': 200, 'data': [item.to_dict() for item in requests_list]})
+
+
+@app.route('/api/class-requests/<int:request_id>/cancel', methods=['POST'])
+@role_required('student')
+def cancel_class_join_request(request_id):
+    join_request = ClassJoinRequest.query.get(request_id)
+    if not join_request or join_request.student_id != request.current_user.id:
+        return jsonify({'code': 404, 'msg': 'request not found'}), 404
+    if join_request.status != 'pending':
+        return jsonify({'code': 400, 'msg': 'only pending request can be cancelled'}), 400
+    join_request.status = 'cancelled'
+    join_request.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'code': 200, 'data': join_request.to_dict()})
+
+
+@app.route('/api/class-requests/<int:request_id>/review', methods=['POST'])
+@role_required('teacher', 'admin')
+def review_class_join_request(request_id):
+    join_request = ClassJoinRequest.query.get(request_id)
+    if not join_request:
+        return jsonify({'code': 404, 'msg': 'request not found'}), 404
+    class_room = join_request.class_room
+    if not _can_manage_class_room(class_room):
+        return jsonify({'code': 403, 'msg': 'Cannot review this request'}), 403
+    if join_request.status != 'pending':
+        return jsonify({'code': 400, 'msg': 'only pending request can be reviewed'}), 400
+    data = request.json or {}
+    decision = (data.get('status') or '').strip()
+    if decision not in {'approved', 'rejected'}:
+        return jsonify({'code': 400, 'msg': 'status must be approved or rejected'}), 400
+    join_request.status = decision
+    join_request.review_message = (data.get('review_message') or '').strip() or None
+    join_request.reviewer_id = request.current_user.id
+    join_request.reviewed_at = datetime.utcnow()
+    if decision == 'approved':
+        membership = ClassMember.query.filter_by(class_id=join_request.class_id, student_id=join_request.student_id).first()
+        if not membership:
+            db.session.add(ClassMember(class_id=join_request.class_id, student_id=join_request.student_id))
+            _write_class_member_log(join_request.class_id, join_request.student_id, 'approved', source='request', details='join request approved')
+    db.session.commit()
+    return jsonify({'code': 200, 'data': join_request.to_dict()})
+
+
+@app.route('/api/my/classes/<int:class_id>', methods=['DELETE'])
+@role_required('student')
+def leave_my_class(class_id):
+    membership = ClassMember.query.filter_by(class_id=class_id, student_id=request.current_user.id).first()
+    if not membership:
+        return jsonify({'code': 404, 'msg': 'membership not found'}), 404
+    db.session.delete(membership)
+    _write_class_member_log(class_id, request.current_user.id, 'left', source='self_leave', details='student left class')
+    db.session.commit()
+    return jsonify({'code': 200, 'msg': 'left class'})
+
+
+@app.route('/api/classes/<int:class_id>/knowledge-status', methods=['GET'])
+@token_required
+def get_class_knowledge_status(class_id):
+    class_room = ClassRoom.query.get(class_id)
+    if not class_room:
+        return jsonify({'code': 404, 'msg': 'class not found'}), 404
+    role = _current_user_role()
+    if role in {'teacher', 'admin'}:
+        if not _can_manage_class_room(class_room):
+            return jsonify({'code': 403, 'msg': 'Cannot view this class'}), 403
+    elif not _is_student_in_class(class_id):
+        return jsonify({'code': 403, 'msg': 'Cannot view this class'}), 403
+    return jsonify({'code': 200, 'data': _class_knowledge_status(class_room)})
+
+
+@app.route('/api/classes/<int:class_id>/member-logs', methods=['GET'])
+@role_required('teacher', 'admin')
+def list_class_member_logs(class_id):
+    class_room = ClassRoom.query.get(class_id)
+    if not class_room:
+        return jsonify({'code': 404, 'msg': 'class not found'}), 404
+    if not _can_manage_class_room(class_room):
+        return jsonify({'code': 403, 'msg': 'Cannot manage this class'}), 403
+    logs = ClassMemberLog.query.filter_by(class_id=class_id).order_by(ClassMemberLog.created_at.desc()).limit(100).all()
+    return jsonify({'code': 200, 'data': [item.to_dict() for item in logs]})
 
 
 @app.route('/api/admin/class-knowledge-bases', methods=['GET'])
